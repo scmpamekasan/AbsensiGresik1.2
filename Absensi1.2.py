@@ -199,6 +199,28 @@ st.info("Aplikasi memerlukan akses lokasi. Harap pilih **Allow/Izinkan** jika br
 
 # Mengambil koordinat secara langsung di tingkat skrip (asinkron)
 loc = get_geolocation()
+# Tambahkan baris ini untuk membaca jenis browser/HP
+user_agent = st.session_state.get('user_device', 'Tidak Terdeteksi')
+
+from streamlit_js_eval import streamlit_js_eval
+try:
+    ua_string = streamlit_js_eval(cmd_id='navigator.userAgent', want_output=True, key='get_ua')
+    if ua_string:
+        # Sederhanakan string agar mudah dibaca (Misal: Android, iPhone, Windows)
+        if "Android" in ua_string:
+            # Mencari model HP jika Android (misal: Samsung, Oppo, Redmi)
+            parts = ua_string.split(';')
+            user_agent = parts[2].strip() if len(parts) > 2 else "Android Device"
+        elif "iPhone" in ua_string:
+            user_agent = "iPhone"
+        elif "Windows" in ua_string:
+            user_agent = "PC / Windows"
+        elif "Macintosh" in ua_string:
+            user_agent = "Macbook / macOS"
+        else:
+            user_agent = "Perangkat Lain"
+except:
+    user_agent = "Tidak Terdeteksi"
 
 if loc and isinstance(loc, dict) and loc.get("coords"):
     st.session_state['user_lat'] = loc["coords"]["latitude"]
