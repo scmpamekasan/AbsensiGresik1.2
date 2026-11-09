@@ -15,10 +15,9 @@ import math
 KODE_QR_SAH = "KANTOR_UTAMA_SECRET_KEY_2026"
 
 # --- PENGATURAN GEOFENCING ---
-# Ganti dengan koordinat kantor Anda yang sebenarnya
-KANTOR_LATITUDE = -7.259138          # Contoh: Kantor DSO
-KANTOR_LONGITUDE = 112.696182
-RADIUS_MAKSIMAL_METER = 150          # Radius yang diizinkan (meter)
+KANTOR_LATITUDE = -7.259138          # Ganti dengan latitude kantor Anda
+KANTOR_LONGITUDE = 112.696182        # Ganti dengan longitude kantor Anda
+RADIUS_MAKSIMAL_METER = 150          # Radius maksimal (meter)
 
 KARYAWAN_DATA = {
     "EMP001": "Eka Sulawestara",
@@ -101,11 +100,10 @@ def simpan_absen_baru(tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon,
         conn.close()
 
 # ====================================================
-# FUNGSI GEOFENCING (Haversine)
+# FUNGSI GEOFENCING
 # ====================================================
 def hitung_jarak_meter(lat1, lon1, lat2, lon2):
-    """Menghitung jarak antara dua koordinat dalam meter (Haversine Formula)"""
-    R = 6371000  # Radius bumi dalam meter
+    R = 6371000
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
     delta_phi = math.radians(lat2 - lat1)
@@ -114,7 +112,6 @@ def hitung_jarak_meter(lat1, lon1, lat2, lon2):
     a = math.sin(delta_phi / 2)**2 + \
         math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
     return R * c
 
 # ====================================================
@@ -138,7 +135,7 @@ def ekstrak_gps_dari_foto(bytes_gambar):
         gps_data = exif_dict.get("GPS")
         
         if not gps_data:
-            return None, None, "GPS Tidak Aktif / Tidak Tersedia"
+            return None, None, "GPS Tidak Tersedia"
         
         lat_val = gps_data.get(piexif.GPSIFD.GPSLatitude)
         lat_ref = gps_data.get(piexif.GPSIFD.GPSLatitudeRef)
@@ -217,13 +214,18 @@ def to_excel(df):
 # ====================================================
 st.set_page_config(page_title="Absensi QR + GPS + Geofencing", layout="centered")
 st.title("🔒 Sistem Absensi QR Code + Geofencing")
-st.caption("Scan QR • Deteksi Kamera • GPS • Geofencing Radius Kantor")
+st.caption("Versi Longgar • GPS tidak wajib • Geofencing aktif jika GPS tersedia")
 
-# Tampilkan info geofencing
-with st.expander("📍 Informasi Geofencing Kantor", expanded=False):
+with st.expander("📍 Informasi Geofencing & Aturan", expanded=False):
     st.write(f"**Koordinat Kantor:** `{KANTOR_LATITUDE}, {KANTOR_LONGITUDE}`")
     st.write(f"**Radius Maksimal:** `{RADIUS_MAKSIMAL_METER} meter`")
-    st.caption("Absensi hanya dianggap sah jika Anda berada dalam radius di atas.")
+    st.markdown("""
+    **Aturan Absensi:**
+    - QR Code harus benar
+    - Wajib menggunakan **Kamera Langsung**
+    - Jika GPS tersedia → harus dalam radius kantor
+    - Jika GPS tidak tersedia → tetap diterima dengan status **Perlu Verifikasi**
+    """)
 
 emp_id = st.selectbox(
     "Pilih Profil ID Karyawan",
@@ -235,12 +237,11 @@ st.write("---")
 st.markdown("### 📸 Ambil Foto QR Code Kantor")
 
 st.info("""
-**Syarat Absensi Sah:**
-1. Menggunakan **Kamera Langsung** (bukan dari Galeri)
-2. QR Code resmi kantor terdeteksi
-3. GPS HP aktif
-4. Berada dalam radius **{} meter** dari kantor
-""".format(RADIUS_MAKSIMAL_METER))
+**Petunjuk:**
+1. Tekan tombol kamera di bawah
+2. Arahkan ke QR Code resmi kantor
+3. Sebisa mungkin aktifkan GPS/Location HP
+""")
 
 picture = st.camera_input("Ambil foto QR Code sekarang")
 
@@ -254,7 +255,7 @@ if picture is not None:
     # 2. Ekstrak GPS
     user_lat, user_lon, koordinat_str = ekstrak_gps_dari_foto(bytes_data)
     
-    # 3. Hitung jarak geofencing
+    # 3. Hitung jarak (jika ada GPS)
     jarak = None
     dalam_radius = False
     if user_lat is not None and user_lon is not None:
@@ -265,7 +266,7 @@ if picture is not None:
     st.image(bytes_data, caption=f"Pratinjau ({sumber_foto})", width=280)
     
     # 5. Scan QR
-    with st.spinner("Sedang memindai QR Code & memvalidasi lokasi..."):
+    with st.spinner("Sedang memindai QR Code & memvalidasi..."):
         data_qr = scan_qr_code(bytes_data)
     
     if data_qr:
@@ -274,45 +275,52 @@ if picture is not None:
             hari_ini = waktu_sekarang.strftime("%Y-%m-%d")
             waktu_str = waktu_sekarang.strftime("%Y-%m-%d %H:%M:%S")
             
-            # ===== LOGIKA STATUS + GEOFENCING =====
+            # ===== LOGIKA STATUS (VERSI LONGGAR) =====
+            boleh_simpan = False
+            status = ""
+            
             if sumber_foto != "Kamera Langsung":
                 status = "Ditolak - Foto dari Galeri"
                 boleh_simpan = False
-            elif user_lat is None:
-                status = "Ditolak - GPS Tidak Tersedia"
-                boleh_simpan = False
-            elif not dalam_radius:
-                status = f"Ditolak - Di Luar Area Kantor ({jarak:.0f} m)"
-                boleh_simpan = False
-            else:
-                status = f"Hadir Sah (Dalam Radius {jarak:.0f} m)"
+            
+            elif user_lat is not None:  # Ada GPS
+                if dalam_radius:
+                    status = f"Hadir Sah (Dalam Radius {jarak:.0f} m)"
+                    boleh_simpan = True
+                else:
+                    status = f"Ditolak - Di Luar Area Kantor ({jarak:.0f} m)"
+                    boleh_simpan = False
+            
+            else:  # Tidak ada GPS → tetap diterima
+                status = "Hadir (Tanpa GPS - Perlu Verifikasi)"
                 boleh_simpan = True
             
-            # Simpan hanya jika memenuhi syarat
+            # Simpan data
             if boleh_simpan:
                 berhasil = simpan_absen_baru(
                     hari_ini, emp_id, KARYAWAN_DATA[emp_id],
                     waktu_str, koordinat_str, user_lat, user_lon,
-                    round(jarak, 1), status, sumber_foto
+                    round(jarak, 1) if jarak is not None else None,
+                    status, sumber_foto
                 )
                 
                 if berhasil:
                     st.success(f"🎉 ABSENSI BERHASIL!\n\nSelamat bekerja, **{KARYAWAN_DATA[emp_id]}**")
                     st.write(f"**Status:** {status}")
-                    st.write(f"**Jarak dari Kantor:** {jarak:.1f} meter")
-                    st.info(f"📍 Koordinat: `{koordinat_str}`")
+                    
+                    if user_lat is not None:
+                        st.info(f"📍 Koordinat: `{koordinat_str}`")
+                        st.write(f"**Jarak dari Kantor:** {jarak:.1f} meter")
+                    else:
+                        st.warning("⚠️ GPS tidak terbaca. Absensi dicatat dengan status **Perlu Verifikasi**.")
                 else:
                     st.warning(f"⚠️ {KARYAWAN_DATA[emp_id]} sudah tercatat hadir hari ini.")
             else:
-                # Tetap bisa dicatat sebagai percobaan gagal (opsional)
                 st.error(f"❌ ABSENSI DITOLAK\n\n**Alasan:** {status}")
                 
                 if jarak is not None:
-                    st.write(f"Jarak Anda saat ini: **{jarak:.1f} meter** dari kantor")
+                    st.write(f"Jarak Anda saat ini: **{jarak:.1f} meter**")
                     st.write(f"Batas maksimal: **{RADIUS_MAKSIMAL_METER} meter**")
-                
-                # Opsional: tetap simpan data penolakan untuk audit
-                # simpan_absen_baru(..., status, ...) 
         else:
             st.error("❌ QR Code tidak valid. Ini bukan QR Code resmi kantor.")
     else:
