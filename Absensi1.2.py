@@ -285,3 +285,61 @@ if not df_absen.empty:
     )
 else:
     st.info("Belum ada riwayat data presensi karyawan yang tercatat untuk hari ini.")
+
+# ====================================================
+# 6. PANEL ADMIN (RIWAYAT & DOWNLOAD LOG)
+# ====================================================
+st.write("---")
+st.markdown("### 📊 Panel Monitoring Absensi (Real-time)")
+
+df_absen = muat_data_absen()
+
+if not df_absen.empty:
+    st.dataframe(df_absen, use_container_width=True)
+    
+    # Ambil waktu WIB saat tombol unduh dibuat untuk penamaan file Excel
+    waktu_unduh = datetime.now(TZ_WIB).strftime("%Y%m%d_%H%M%S")
+    data_excel = to_excel(df_absen)
+    
+    # Letakkan tombol download dan reset berdampingan
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.download_button(
+            label="📥 Unduh Seluruh Riwayat Absensi (Excel)",
+            data=data_excel,
+            file_name=f"log_absensi_{waktu_unduh}_WIB.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+        
+    with col2:
+        # Tombol pemicu awal untuk memunculkan konfirmasi reset
+        if st.button("🗑️ Reset Data Log Absensi", type="secondary", use_container_width=True):
+            st.session_state['konfirmasi_reset'] = True
+
+    # Menu konfirmasi keamanan tambahan agar data tidak sengaja terhapus
+    if st.session_state.get('konfirmasi_reset', False):
+        st.warning("⚠️ Apakah Anda yakin ingin menghapus data absensi? Tindakan ini tidak dapat dibatalkan.")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("❌ Batalkan", use_container_width=True):
+                st.session_state['konfirmasi_reset'] = False
+                st.rerun()
+                
+        with c2:
+            if st.button("🔥 Ya, Hapus Semua Data", type="primary", use_container_width=True):
+                # Eksekusi pengosongan tabel database SQLite
+                conn = sqlite3.connect(DB_NAME)
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM absensi")
+                conn.commit()
+                conn.close()
+                
+                # Reset state dan refresh halaman
+                st.session_state['konfirmasi_reset'] = False
+                st.success("🗑️ Semua data riwayat log absensi berhasil dibersihkan!")
+                st.rerun()
+else:
+    st.info("Belum ada riwayat data presensi karyawan yang tercatat untuk hari ini.")
