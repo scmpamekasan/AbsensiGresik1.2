@@ -71,6 +71,8 @@ BATAS_JAM_MASUK = time(8, 0, 0)
 KARYAWAN_DATA = {
     "05001908": "Lila Aditya Perdana",
     "05002370": "Hendra",
+    "05002376": "Dian Candra Wijaya",
+    "05002729": "Angga Setia Permana",
     "05002934": "Arif Yuliadi",
     "05003750": "Septian Chandra",
     "05003758": "Alfian Nurhuda",
@@ -261,7 +263,7 @@ def to_excel(df):
 # ====================================================
 # 5. HEADER & TAMPILAN UTAMA (UI MODERN)
 # ====================================================
-st.markdown("<h1 style='text-align: center; margin-bottom: 5px;'>🏢 Portal Absensi Karyawan</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center; margin-bottom: 5px;'>Absensi Karyawan Gresik Kota</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; color: #64748b; margin-bottom: 30px;'>Sistem Verifikasi Kehadiran Berbasis Geofencing & QR Code Terpadu</p>", unsafe_allow_html=True)
 
 if not JS_EVAL_AVAILABLE:
