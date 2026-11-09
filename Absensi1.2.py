@@ -76,7 +76,7 @@ def inisialisasi_database():
         )
     """)
     
-    # Cek jika kolom 'device_info' belum ada pada tabel lama (migrasi otomatis)
+    # Migrasi otomatis jika kolom device_info belum ada pada database lama
     cursor.execute("PRAGMA table_info(absensi)")
     kolom = [kol[1] for kol in cursor.fetchall()]
     if "device_info" not in kolom:
@@ -90,7 +90,6 @@ def inisialisasi_database():
     conn.commit()
     conn.close()
 
-# Jalankan inisialisasi skema saat aplikasi dimuat
 inisialisasi_database()
 
 def muat_data_absen():
@@ -113,6 +112,18 @@ def muat_data_absen():
     conn.close()
     return df
 
+def cek_device_sudah_absen(tanggal, device_info):
+    """Mengecek apakah HP/Device tertentu sudah pernah dipakai absen pada hari ini"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT nama FROM absensi 
+        WHERE tanggal = ? AND device_info = ?
+    """, (tanggal, device_info))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else None
+
 def simpan_absen(tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon, jarak, status, device_info):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -133,7 +144,7 @@ def simpan_absen(tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon, jara
 # 4. FUNGSI BANTU (GEOFENCING, QR & DEVICE PARSER)
 # ====================================================
 def hitung_jarak_meter(lat1, lon1, lat2, lon2):
-    R = 6371000  # Radius bumi dalam satuan meter
+    R = 6371000  
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
     delta_phi = math.radians(lat2 - lat1)
@@ -218,7 +229,7 @@ def to_excel(df):
 # 5. ANTARMUKA PENGGUNA (STREAMLIT INTERFACE)
 # ====================================================
 st.set_page_config(page_title="Absensi QR + GPS", layout="centered")
-st.title("Absensi Team Bermalam Gresik Kota")
+st.title("🔒 Sistem Absensi QR + GPS")
 
 if not JS_EVAL_AVAILABLE:
     st.error("""
@@ -230,7 +241,7 @@ if not JS_EVAL_AVAILABLE:
     """)
     st.stop()
 
-# Ambil User-Agent dari header browser
+# Ambil User-Agent dari header browser untuk identifikasi HP
 user_agent_header = ""
 try:
     if hasattr(st, "context") and hasattr(st.context, "headers"):
@@ -281,13 +292,13 @@ if 'user_lat' in st.session_state and 'user_lon' in st.session_state:
         st.session_state['boleh_scan'] = False
 
 # ====================================================
-# 6. PEMINDAIAN QR CODE (DENGAN AUTO-RESET KAMERA & HALAMAN)
+# 6. PEMINDAIAN QR CODE (DENGAN PROTEKSI GANDA & AUTO-RESET)
 # ====================================================
 if st.session_state.get('boleh_scan', False):
     st.write("---")
     st.markdown("### 2️⃣ Pindai QR Code Kantor")
     
-    # Key kamera dibuat dinamis agar hancur/bersih total saat counter bertambah
+    # Key kamera dinamis agar komponen otomatis hancur & bersih saat di-reset
     dynamic_camera_key = f"kamera_absen_{st.session_state['counter_reset']}"
     picture = st.camera_input("Arahkan kamera ke QR Code Resmi Kantor", key=dynamic_camera_key)
 
@@ -303,31 +314,37 @@ if st.session_state.get('boleh_scan', False):
             hari_ini = waktu_sekarang.strftime("%Y-%m-%d")
             waktu_str = waktu_sekarang.strftime("%Y-%m-%d %H:%M:%S")
             koordinat_str = f"{user_lat:.6f},{user_lon:.6f}"
-            status_teks = "Berhasil"
             nama_karyawan = KARYAWAN_DATA[emp_id]
             
             info_perangkat = parsing_device_info(user_agent_header)
 
-            berhasil = simpan_absen(
-                hari_ini, emp_id, nama_karyawan, waktu_str, 
-                koordinat_str, user_lat, user_lon, jarak, status_teks, info_perangkat
-            )
-
-            if berhasil:
-                st.balloons()
-                st.success(f"🎉 Absensi BERHASIL dicatat untuk **{nama_karyawan}** pada {waktu_str} WIB!")
-                
-                # --- RESET TOTAL HALAMAN & KAMERA ---
-                for key in ["user_lat", "user_lon", "gps_accuracy", "boleh_scan"]:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                
-                # Naikkan counter agar widget kamera diperbarui total
-                st.session_state['counter_reset'] += 1
-                
-                st.rerun()
+            # 🛑 VALIDASI 1: Cek apakah HP ini sudah dipakai absen hari ini oleh siapa pun
+            pemilik_sebelumnya = cek_device_sudah_absen(hari_ini, info_perangkat)
+            
+            if pemilik_sebelumnya:
+                st.error(f"❌ **Akses Ditolak!** Perangkat HP ini sudah digunakan untuk melakukan absensi hari ini atas nama **{pemilik_sebelumnya}**. 1 HP hanya dapat digunakan untuk 1 kali absensi per hari.")
             else:
-                st.warning(f"⚠️ **{nama_karyawan}** sudah melakukan absensi hari ini ({hari_ini}). Data duplikat ditolak oleh sistem.")
+                # Eksekusi penyimpanan ke SQLite (Diproteksi juga oleh Unique Index ID Karyawan)
+                status_teks = "Hadir Tepat Radius"
+                berhasil = simpan_absen(
+                    hari_ini, emp_id, nama_karyawan, waktu_str, 
+                    koordinat_str, user_lat, user_lon, jarak, status_teks, info_perangkat
+                )
+
+                if berhasil:
+                    st.balloons()
+                    st.success(f"🎉 Absensi BERHASIL dicatat untuk **{nama_karyawan}** pada {waktu_str} WIB!")
+                    
+                    # --- RESET TOTAL HALAMAN & KAMERA ---
+                    for key in ["user_lat", "user_lon", "gps_accuracy", "boleh_scan"]:
+                        if key in st.session_state:
+                            del st.session_state[key]
+                    
+                    # Naikkan counter agar widget kamera diperbarui total (bersih dari foto sebelumnya)
+                    st.session_state['counter_reset'] += 1
+                    st.rerun()
+                else:
+                    st.warning(f"⚠️ **{nama_karyawan}** sudah melakukan absensi hari ini ({hari_ini}). Data duplikat ditolak oleh sistem.")
         else:
             st.error("❌ QR Code tidak valid atau tidak terdeteksi! Pastikan kode tegak lurus dan pencahayaan cukup.")
 
@@ -383,7 +400,7 @@ if st.session_state.get('konfirmasi_reset', False):
                 conn.commit()
                 conn.close()
                 
-                st.session_state['konfirmasi_reset'] = False
+                _ = st.session_state.pop('konfirmasi_reset', None)
                 st.success("🗑️ Seluruh riwayat log absensi berhasil dibersihkan secara permanen!")
                 st.rerun()
             else:
