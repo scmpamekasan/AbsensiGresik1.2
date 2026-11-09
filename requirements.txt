@@ -6,3 +6,4 @@ piexif
 openpyxl
 pillow
 streamlit-js-eval
+pytz
