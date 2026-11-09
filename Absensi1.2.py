@@ -7,7 +7,7 @@ from datetime import datetime
 from io import BytesIO
 from PIL import Image
 import math
-import pytz
+import pytz  # Library untuk mengatur zona waktu WIB
 
 # Proteksi impor untuk streamlit-js-eval
 try:
@@ -16,24 +16,26 @@ try:
 except ImportError:
     JS_EVAL_AVAILABLE = False
 
+# Definisi Zona Waktu Asia/Jakarta (WIB)
+TZ_WIB = pytz.timezone('Asia/Jakarta')
+
 # ====================================================
 # 1. KONFIGURASI UTAMA KANTOR & DATA
 # ====================================================
 KODE_QR_SAH = "KANTOR_UTAMA_SECRET_KEY_2026"
 
-# Koordinat Kantor (Silakan sesuaikan dengan lokasi kantor Anda)
+# Koordinat Kantor Terbaru
 KANTOR_LATITUDE = -7.259016          
 KANTOR_LONGITUDE = 112.696162
 RADIUS_MAKSIMAL_METER = 150
 
-# Data Karyawan Terdaftar
+# Data Karyawan Terdaftar Terbaru
 KARYAWAN_DATA = {
     "05001908": "Lila Aditya Perdana",
     "05002370": "Hendra",
     "05002934": "Arif Yuliadi",
     "05003750": "Septian Chandra",
     "05003758": "Alfian Nurhuda",
-    "05003750": "Septian Chandra",
     "05004639": "Budi Setyawan",
     "05004711": "Khoirul Rijal",
     "05005032": "Maxbafasya Aditya Wibowo",
@@ -42,7 +44,7 @@ KARYAWAN_DATA = {
     "05007150": "Lurico Umar Raffsanjani",
     "05007173": "Diska Akbar Hermanto",
     "05007712": "Nur Nuhammad Khoirul Firmansyah",
-    "05008111": "Mohammad Holidi",
+    "05008111": "Mohammad Holidi"
 }
 
 DB_NAME = "absen_master.db"
@@ -129,7 +131,7 @@ def proses_gambar_untuk_qr(bytes_data):
     img_np = np.array(img)
     
     if len(img_np.shape) == 3:
-        if img_np.shape[2] == 4:
+        if img_np.shape == 4:
             img_np = cv2.cvtColor(img_np, cv2.COLOR_RGBA2BGR)
         else:
             img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
@@ -194,7 +196,7 @@ st.write("---")
 st.markdown("### 1️⃣ Verifikasi Lokasi GPS")
 st.info("Aplikasi memerlukan akses lokasi. Harap pilih **Allow/Izinkan** jika browser memunculkan pop-up permintaan lokasi.")
 
-# SOLUSI UTAMA: Mengambil koordinat secara langsung di tingkat skrip (asinkron)
+# Mengambil koordinat secara langsung di tingkat skrip (asinkron)
 loc = get_geolocation()
 
 if loc and isinstance(loc, dict) and loc.get("coords"):
@@ -240,9 +242,7 @@ if st.session_state.get('boleh_scan', False):
             data_qr = scan_qr_code(bytes_data)
 
         if data_qr == KODE_QR_SAH:
-            tz_wib = pytz.timezone('Asia/Jakarta')
-            waktu_sekarang = datetime.now(tz_wib)
-
+            waktu_sekarang = datetime.now(TZ_WIB)
             hari_ini = waktu_sekarang.strftime("%Y-%m-%d")
             waktu_str = waktu_sekarang.strftime("%Y-%m-%d %H:%M:%S")
             koordinat_str = f"{user_lat:.6f},{user_lon:.6f}"
@@ -257,14 +257,14 @@ if st.session_state.get('boleh_scan', False):
 
             if berhasil:
                 st.balloons()
-                st.success(f"🎉 Absensi BERHASIL dicatat untuk **{nama_karyawan}** pada {waktu_str}!")
+                st.success(f"🎉 Absensi BERHASIL dicatat untuk **{nama_karyawan}** pada {waktu_str} WIB!")
             else:
                 st.warning(f"⚠️ **{nama_karyawan}** sudah melakukan absensi hari ini ({hari_ini}). Data duplikat ditolak oleh sistem.")
         else:
             st.error("❌ QR Code tidak valid atau tidak terdeteksi! Pastikan kode tegak lurus dan pencahayaan cukup.")
 
 # ====================================================
-# 6. PANEL ADMIN (RIWAYAT & DOWNLOAD LOG)
+# 6. PANEL ADMIN (RIWAYAT & DOWNLOAD & RESET TOTAL)
 # ====================================================
 st.write("---")
 st.markdown("### 📊 Panel Monitoring Absensi (Real-time)")
@@ -274,14 +274,7 @@ df_absen = muat_data_absen()
 if not df_absen.empty:
     st.dataframe(df_absen, use_container_width=True)
     
-    # Tombol Unduh Data Log Format Excel
+    waktu_unduh = datetime.now(TZ_WIB).strftime("%Y%m%d_%H%M%S")
     data_excel = to_excel(df_absen)
-    st.download_button(
-        label="📥 Unduh Seluruh Riwayat Absensi (Excel)",
-        data=data_excel,
-        file_name=f"log_absensi_{datetime.now().strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
-    )
-else:
-    st.info("Belum ada riwayat data presensi karyawan yang tercatat untuk hari ini.")
+    
+    col1, col2 = st.columns(2)
