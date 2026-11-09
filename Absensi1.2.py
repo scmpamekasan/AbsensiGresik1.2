@@ -3,20 +3,20 @@ import pandas as pd
 import cv2
 import numpy as np
 import sqlite3
-import piexif
 from datetime import datetime
 from io import BytesIO
 from PIL import Image
 import math
+from streamlit_js_eval import get_geolocation
 
 # ====================================================
-# CONFIGURASI UTAMA
+# CONFIGURASI
 # ====================================================
 KODE_QR_SAH = "KANTOR_UTAMA_SECRET_KEY_2026"
 
-# --- PENGATURAN GEOFENCING ---
-KANTOR_LATITUDE = -7.259138          # Ganti dengan latitude kantor Anda
-KANTOR_LONGITUDE = 112.696182        # Ganti dengan longitude kantor Anda
+# --- GEOFENCING ---
+KANTOR_LATITUDE = -7.259138          # Ganti dengan latitude kantor
+KANTOR_LONGITUDE = 112.696182        # Ganti dengan longitude kantor
 RADIUS_MAKSIMAL_METER = 150          # Radius maksimal (meter)
 
 KARYAWAN_DATA = {
@@ -31,7 +31,7 @@ DB_NAME = "absen_master.db"
 # ====================================================
 # DATABASE
 # ====================================================
-def inisialisasi_database_sqlite():
+def inisialisasi_database():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
@@ -44,8 +44,7 @@ def inisialisasi_database_sqlite():
             latitude REAL,
             longitude REAL,
             jarak_dari_kantor REAL,
-            status TEXT,
-            sumber_foto TEXT
+            status TEXT
         )
     """)
     cursor.execute("""
@@ -55,7 +54,7 @@ def inisialisasi_database_sqlite():
     conn.commit()
     conn.close()
 
-inisialisasi_database_sqlite()
+inisialisasi_database()
 
 def muat_data_absen():
     conn = sqlite3.connect(DB_NAME)
@@ -70,28 +69,26 @@ def muat_data_absen():
                 latitude AS Latitude, 
                 longitude AS Longitude, 
                 jarak_dari_kantor AS [Jarak (meter)],
-                status AS Status, 
-                sumber_foto AS [Sumber Foto]
+                status AS Status
             FROM absensi
         """, conn)
-        df['Koordinat GPS'] = df['Koordinat GPS'].astype(str)
     except:
         df = pd.DataFrame(columns=[
             "Tanggal", "ID", "Nama", "Waktu Presensi", "Koordinat GPS",
-            "Latitude", "Longitude", "Jarak (meter)", "Status", "Sumber Foto"
+            "Latitude", "Longitude", "Jarak (meter)", "Status"
         ])
     conn.close()
     return df
 
-def simpan_absen_baru(tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon, jarak, status, sumber_foto):
+def simpan_absen(tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon, jarak, status):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     try:
         cursor.execute("""
             INSERT INTO absensi 
-            (tanggal, id_karyawan, nama, waktu_presensi, koordinat_gps, latitude, longitude, jarak_dari_kantor, status, sumber_foto)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon, jarak, status, sumber_foto))
+            (tanggal, id_karyawan, nama, waktu_presensi, koordinat_gps, latitude, longitude, jarak_dari_kantor, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon, jarak, status))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -100,7 +97,7 @@ def simpan_absen_baru(tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon,
         conn.close()
 
 # ====================================================
-# FUNGSI GEOFENCING
+# FUNGSI BANTU
 # ====================================================
 def hitung_jarak_meter(lat1, lon1, lat2, lon2):
     R = 6371000
@@ -108,63 +105,9 @@ def hitung_jarak_meter(lat1, lon1, lat2, lon2):
     phi2 = math.radians(lat2)
     delta_phi = math.radians(lat2 - lat1)
     delta_lambda = math.radians(lon2 - lon1)
-
-    a = math.sin(delta_phi / 2)**2 + \
-        math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    a = math.sin(delta_phi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(delta_lambda/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
-
-# ====================================================
-# FUNGSI GPS
-# ====================================================
-def konversi_ke_derajat_desimal(nilai, referensi):
-    try:
-        derajat = float(nilai[0][0]) / float(nilai[0][1])
-        menit   = float(nilai[1][0]) / float(nilai[1][1])
-        detik   = float(nilai[2][0]) / float(nilai[2][1])
-        desimal = derajat + (menit / 60.0) + (detik / 3600.0)
-        if referensi in ['S', 'W']:
-            desimal = -desimal
-        return desimal
-    except:
-        return None
-
-def ekstrak_gps_dari_foto(bytes_gambar):
-    try:
-        exif_dict = piexif.load(bytes_gambar)
-        gps_data = exif_dict.get("GPS")
-        
-        if not gps_data:
-            return None, None, "GPS Tidak Tersedia"
-        
-        lat_val = gps_data.get(piexif.GPSIFD.GPSLatitude)
-        lat_ref = gps_data.get(piexif.GPSIFD.GPSLatitudeRef)
-        lon_val = gps_data.get(piexif.GPSIFD.GPSLongitude)
-        lon_ref = gps_data.get(piexif.GPSIFD.GPSLongitudeRef)
-        
-        if lat_val and lon_val and lat_ref and lon_ref:
-            lat_ref = lat_ref.decode('utf-8') if isinstance(lat_ref, bytes) else lat_ref
-            lon_ref = lon_ref.decode('utf-8') if isinstance(lon_ref, bytes) else lon_ref
-            
-            lat = konversi_ke_derajat_desimal(lat_val, lat_ref)
-            lon = konversi_ke_derajat_desimal(lon_val, lon_ref)
-            
-            if lat is not None and lon is not None:
-                return lat, lon, f"{lat:.6f},{lon:.6f}"
-        
-        return None, None, "GPS Tidak Lengkap"
-    except Exception:
-        return None, None, "Gagal Membaca EXIF GPS"
-
-# ====================================================
-# FUNGSI DETEKSI KAMERA & QR
-# ====================================================
-def deteksi_sumber_foto(nama_file: str) -> str:
-    nama = nama_file.lower()
-    kamera_keywords = ["camera", "captured", "image", "photo", "img_", "cam_"]
-    if any(k in nama for k in kamera_keywords) or nama.startswith("camera"):
-        return "Kamera Langsung"
-    return "Dari Galeri / File"
 
 def proses_gambar_untuk_qr(bytes_data):
     img = Image.open(BytesIO(bytes_data))
@@ -186,19 +129,14 @@ def proses_gambar_untuk_qr(bytes_data):
     versions = [img_np]
     gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
     versions.append(cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR))
-    
-    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                   cv2.THRESH_BINARY, 11, 2)
+    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
     versions.append(cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR))
-    
     return versions
 
 def scan_qr_code(bytes_data):
     detector = cv2.QRCodeDetector()
-    versions = proses_gambar_untuk_qr(bytes_data)
-    
-    for img in versions:
-        data, bbox, _ = detector.detectAndDecode(img)
+    for img in proses_gambar_untuk_qr(bytes_data):
+        data, _, _ = detector.detectAndDecode(img)
         if data:
             return data
     return None
@@ -212,20 +150,14 @@ def to_excel(df):
 # ====================================================
 # INTERFACE
 # ====================================================
-st.set_page_config(page_title="Absensi QR + GPS + Geofencing", layout="centered")
-st.title("🔒 Sistem Absensi QR Code + Geofencing")
-st.caption("Versi Longgar • GPS tidak wajib • Geofencing aktif jika GPS tersedia")
+st.set_page_config(page_title="Absensi QR + GPS Browser", layout="centered")
+st.title("🔒 Sistem Absensi QR + GPS Akurat")
+st.caption("Menggunakan lokasi GPS langsung dari HP (lebih andal)")
 
-with st.expander("📍 Informasi Geofencing & Aturan", expanded=False):
+# Info Geofencing
+with st.expander("📍 Informasi Geofencing", expanded=False):
     st.write(f"**Koordinat Kantor:** `{KANTOR_LATITUDE}, {KANTOR_LONGITUDE}`")
     st.write(f"**Radius Maksimal:** `{RADIUS_MAKSIMAL_METER} meter`")
-    st.markdown("""
-    **Aturan Absensi:**
-    - QR Code harus benar
-    - Wajib menggunakan **Kamera Langsung**
-    - Jika GPS tersedia → harus dalam radius kantor
-    - Jika GPS tidak tersedia → tetap diterima dengan status **Perlu Verifikasi**
-    """)
 
 emp_id = st.selectbox(
     "Pilih Profil ID Karyawan",
@@ -234,100 +166,85 @@ emp_id = st.selectbox(
 )
 
 st.write("---")
-st.markdown("### 📸 Ambil Foto QR Code Kantor")
+st.markdown("### 1️⃣ Ambil Lokasi GPS Anda")
 
-st.info("""
-**Petunjuk:**
-1. Tekan tombol kamera di bawah
-2. Arahkan ke QR Code resmi kantor
-3. Sebisa mungkin aktifkan GPS/Location HP
-""")
+# Tombol ambil lokasi
+if st.button("📍 Ambil Lokasi GPS Saya", use_container_width=True, type="primary"):
+    loc = get_geolocation()
+    
+    if loc and loc.get("coords"):
+        st.session_state['user_lat'] = loc["coords"]["latitude"]
+        st.session_state['user_lon'] = loc["coords"]["longitude"]
+        st.session_state['gps_accuracy'] = loc["coords"].get("accuracy", None)
+        st.success("Lokasi berhasil diambil!")
+        st.rerun()
+    else:
+        st.error("Gagal mengambil lokasi. Pastikan Anda mengizinkan akses lokasi di browser.")
 
-picture = st.camera_input("Ambil foto QR Code sekarang")
+# Tampilkan hasil GPS jika sudah ada
+if 'user_lat' in st.session_state and 'user_lon' in st.session_state:
+    user_lat = st.session_state['user_lat']
+    user_lon = st.session_state['user_lon']
+    jarak = hitung_jarak_meter(user_lat, user_lon, KANTOR_LATITUDE, KANTOR_LONGITUDE)
+    dalam_radius = jarak <= RADIUS_MAKSIMAL_METER
+    
+    st.write(f"**Koordinat Anda:** `{user_lat:.6f}, {user_lon:.6f}`")
+    st.write(f"**Jarak dari Kantor:** `{jarak:.1f} meter`")
+    
+    if dalam_radius:
+        st.success(f"✅ Anda berada dalam radius kantor ({jarak:.1f} m)")
+        st.session_state['boleh_scan'] = True
+    else:
+        st.error(f"❌ Anda berada di luar radius kantor ({jarak:.1f} m). Maksimal {RADIUS_MAKSIMAL_METER} meter.")
+        st.session_state['boleh_scan'] = False
+else:
+    st.info("Silakan tekan tombol di atas untuk mengambil lokasi GPS Anda terlebih dahulu.")
+    st.session_state['boleh_scan'] = False
 
-if picture is not None:
-    bytes_data = picture.getvalue()
-    nama_file = getattr(picture, "name", "camera_input.jpg")
+# ====================================================
+# BAGIAN SCAN QR (hanya muncul jika dalam radius)
+# ====================================================
+if st.session_state.get('boleh_scan', False):
+    st.write("---")
+    st.markdown("### 2️⃣ Scan QR Code Kantor")
     
-    # 1. Deteksi sumber foto
-    sumber_foto = deteksi_sumber_foto(nama_file)
+    picture = st.camera_input("Ambil foto QR Code sekarang")
     
-    # 2. Ekstrak GPS
-    user_lat, user_lon, koordinat_str = ekstrak_gps_dari_foto(bytes_data)
-    
-    # 3. Hitung jarak (jika ada GPS)
-    jarak = None
-    dalam_radius = False
-    if user_lat is not None and user_lon is not None:
-        jarak = hitung_jarak_meter(user_lat, user_lon, KANTOR_LATITUDE, KANTOR_LONGITUDE)
-        dalam_radius = jarak <= RADIUS_MAKSIMAL_METER
-    
-    # 4. Preview
-    st.image(bytes_data, caption=f"Pratinjau ({sumber_foto})", width=280)
-    
-    # 5. Scan QR
-    with st.spinner("Sedang memindai QR Code & memvalidasi..."):
-        data_qr = scan_qr_code(bytes_data)
-    
-    if data_qr:
-        if data_qr == KODE_QR_SAH:
-            waktu_sekarang = datetime.now()
-            hari_ini = waktu_sekarang.strftime("%Y-%m-%d")
-            waktu_str = waktu_sekarang.strftime("%Y-%m-%d %H:%M:%S")
-            
-            # ===== LOGIKA STATUS (VERSI LONGGAR) =====
-            boleh_simpan = False
-            status = ""
-            
-            if sumber_foto != "Kamera Langsung":
-                status = "Ditolak - Foto dari Galeri"
-                boleh_simpan = False
-            
-            elif user_lat is not None:  # Ada GPS
-                if dalam_radius:
-                    status = f"Hadir Sah (Dalam Radius {jarak:.0f} m)"
-                    boleh_simpan = True
-                else:
-                    status = f"Ditolak - Di Luar Area Kantor ({jarak:.0f} m)"
-                    boleh_simpan = False
-            
-            else:  # Tidak ada GPS → tetap diterima
-                status = "Hadir (Tanpa GPS - Perlu Verifikasi)"
-                boleh_simpan = True
-            
-            # Simpan data
-            if boleh_simpan:
-                berhasil = simpan_absen_baru(
+    if picture is not None:
+        bytes_data = picture.getvalue()
+        st.image(bytes_data, caption="Pratinjau Foto QR", width=280)
+        
+        with st.spinner("Sedang memindai QR Code..."):
+            data_qr = scan_qr_code(bytes_data)
+        
+        if data_qr:
+            if data_qr == KODE_QR_SAH:
+                waktu_sekarang = datetime.now()
+                hari_ini = waktu_sekarang.strftime("%Y-%m-%d")
+                waktu_str = waktu_sekarang.strftime("%Y-%m-%d %H:%M:%S")
+                
+                koordinat_str = f"{user_lat:.6f},{user_lon:.6f}"
+                status = f"Hadir Sah (GPS Browser - {jarak:.0f} m)"
+                
+                berhasil = simpan_absen(
                     hari_ini, emp_id, KARYAWAN_DATA[emp_id],
                     waktu_str, koordinat_str, user_lat, user_lon,
-                    round(jarak, 1) if jarak is not None else None,
-                    status, sumber_foto
+                    round(jarak, 1), status
                 )
                 
                 if berhasil:
                     st.success(f"🎉 ABSENSI BERHASIL!\n\nSelamat bekerja, **{KARYAWAN_DATA[emp_id]}**")
                     st.write(f"**Status:** {status}")
-                    
-                    if user_lat is not None:
-                        st.info(f"📍 Koordinat: `{koordinat_str}`")
-                        st.write(f"**Jarak dari Kantor:** {jarak:.1f} meter")
-                    else:
-                        st.warning("⚠️ GPS tidak terbaca. Absensi dicatat dengan status **Perlu Verifikasi**.")
+                    st.info(f"📍 Koordinat: `{koordinat_str}`")
                 else:
                     st.warning(f"⚠️ {KARYAWAN_DATA[emp_id]} sudah tercatat hadir hari ini.")
             else:
-                st.error(f"❌ ABSENSI DITOLAK\n\n**Alasan:** {status}")
-                
-                if jarak is not None:
-                    st.write(f"Jarak Anda saat ini: **{jarak:.1f} meter**")
-                    st.write(f"Batas maksimal: **{RADIUS_MAKSIMAL_METER} meter**")
+                st.error("❌ QR Code tidak valid.")
         else:
-            st.error("❌ QR Code tidak valid. Ini bukan QR Code resmi kantor.")
-    else:
-        st.error("📷 QR Code tidak terdeteksi.\n\nTips: Dekatkan kamera, pastikan QR tidak buram, dan pencahayaan cukup.")
+            st.error("📷 QR Code tidak terdeteksi. Coba lagi dengan posisi lebih dekat dan stabil.")
 
 # ====================================================
-# PANEL RIWAYAT
+# RIWAYAT
 # ====================================================
 st.write("---")
 st.subheader("📊 Master Riwayat Absensi")
@@ -335,22 +252,13 @@ st.subheader("📊 Master Riwayat Absensi")
 df_master = muat_data_absen()
 
 if not df_master.empty:
-    st.dataframe(
-        df_master.sort_values(by="Waktu Presensi", ascending=False),
-        use_container_width=True
-    )
+    st.dataframe(df_master.sort_values(by="Waktu Presensi", ascending=False), use_container_width=True)
     
-    # Peta
     df_peta = df_master.dropna(subset=['Latitude', 'Longitude'])
     if not df_peta.empty:
-        st.write("### 🗺️ Peta Lokasi Scan Karyawan")
-        st.map(
-            df_peta[['Latitude', 'Longitude']].rename(columns={'Latitude': 'lat', 'Longitude': 'lon'}),
-            zoom=14
-        )
+        st.write("### 🗺️ Peta Lokasi")
+        st.map(df_peta[['Latitude', 'Longitude']].rename(columns={'Latitude': 'lat', 'Longitude': 'lon'}), zoom=14)
     
-    # Download
-    st.write("### 📥 Unduh Data")
     col1, col2 = st.columns(2)
     with col1:
         st.download_button(
