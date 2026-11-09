@@ -373,7 +373,7 @@ if st.session_state.get('boleh_scan', False):
             if pemilik_sebelumnya:
                 st.error(f"❌ **Akses Ditolak!** Perangkat HP ini sudah digunakan untuk absensi hari ini atas nama **{pemilik_sebelumnya}**. (1 Perangkat = 1 Akun per Hari)")
             else:
-                status_teks = "Hadir Tepat Radius"
+                status_teks = "Berhasil"
                 berhasil = simpan_absen(
                     hari_ini, emp_id, nama_karyawan, waktu_str, 
                     koordinat_str, user_lat, user_lon, jarak, status_teks, info_perangkat
