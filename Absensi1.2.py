@@ -303,7 +303,7 @@ if st.session_state.get('boleh_scan', False):
             hari_ini = waktu_sekarang.strftime("%Y-%m-%d")
             waktu_str = waktu_sekarang.strftime("%Y-%m-%d %H:%M:%S")
             koordinat_str = f"{user_lat:.6f},{user_lon:.6f}"
-            status_teks = "Hadir Tepat Radius"
+            status_teks = "Berhasil"
             nama_karyawan = KARYAWAN_DATA[emp_id]
             
             info_perangkat = parsing_device_info(user_agent_header)
