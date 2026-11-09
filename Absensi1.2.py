@@ -3,7 +3,7 @@ import pandas as pd
 import cv2
 import numpy as np
 import sqlite3
-from datetime import datetime
+from datetime import datetime, time
 from io import BytesIO
 from PIL import Image
 import math
@@ -29,40 +29,22 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Menambahkan CSS Kustom untuk Tampilan yang Modern & Keren
 st.markdown("""
     <style>
-    /* Mengubah background utama */
     .stApp {
         background-color: #f8fafc;
     }
-    
-    /* Styling Header Utama */
     h1 {
         color: #1e293b;
         font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
         font-weight: 700;
         letter-spacing: -0.5px;
     }
-    
-    /* Styling Card/Container Kustom */
-    .custom-card {
-        background-color: #ffffff;
-        padding: 20px;
-        border-radius: 12px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        margin-bottom: 20px;
-        border: 1px solid #e2e8f0;
-    }
-    
-    /* Styling Tombol */
     .stButton>button {
         border-radius: 8px;
         font-weight: 600;
         transition: all 0.2s ease-in-out;
     }
-    
-    /* Styling DataFrame */
     div[data-testid="stDataFrame"] {
         border-radius: 10px;
         overflow: hidden;
@@ -81,6 +63,9 @@ KODE_QR_SAH = "KANTOR_UTAMA_SECRET_KEY_2026"
 KANTOR_LATITUDE = -7.259016          
 KANTOR_LONGITUDE = 112.696162
 RADIUS_MAKSIMAL_METER = 150
+
+# Batas Jam Masuk Tepat Waktu (Jam 08:00:00)
+BATAS_JAM_MASUK = time(8, 0, 0)
 
 # Data Karyawan Terdaftar Terbaru
 KARYAWAN_DATA = {
@@ -102,7 +87,6 @@ KARYAWAN_DATA = {
 
 DB_NAME = "absen_master.db"
 
-# Inisialisasi Counter Reset
 if 'counter_reset' not in st.session_state:
     st.session_state['counter_reset'] = 0
 
@@ -277,8 +261,8 @@ def to_excel(df):
 # ====================================================
 # 5. HEADER & TAMPILAN UTAMA (UI MODERN)
 # ====================================================
-st.markdown("<h1 style='text-align: center; margin-bottom: 5px;'>🏢 Absensi Karyawan Team Gresik Kota</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #64748b; margin-bottom: 30px;'>Ojo Telat & Ojo Mbujuk</p>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center; margin-bottom: 5px;'>🏢 Portal Absensi Karyawan</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #64748b; margin-bottom: 30px;'>Sistem Verifikasi Kehadiran Berbasis Geofencing & QR Code Terpadu</p>", unsafe_allow_html=True)
 
 if not JS_EVAL_AVAILABLE:
     st.error("Library `streamlit-js-eval` belum terinstall di requirements.txt!")
@@ -291,15 +275,13 @@ try:
 except Exception:
     pass
 
-# Expander Informasi Kantor yang Lebih Rapi
 with st.expander("📍 Informasi Radius & Lokasi Kantor"):
     col_exp1, col_exp2 = st.columns(2)
     with col_exp1:
         st.markdown(f"**Koordinat Pusat:**\n`{KANTOR_LATITUDE}, {KANTOR_LONGITUDE}`")
     with col_exp2:
-        st.markdown(f"**Batas Maksimal Radius:**\n`{RADIUS_MAKSIMAL_METER} meter`")
+        st.markdown(f"**Batas Maksimal Radius:**\n`{RADIUS_MAKSIMAL_METER} meter`\n\n**Batas Jam Masuk:** `08:00 WIB`")
 
-# Pemilihan Profil Karyawan dengan Tampilan Card
 st.markdown("### 👤 Identitas Karyawan")
 emp_id = st.selectbox(
     "Pilih Profil ID Karyawan Anda",
@@ -327,7 +309,6 @@ if 'user_lat' in st.session_state and 'user_lon' in st.session_state:
     jarak = hitung_jarak_meter(user_lat, user_lon, KANTOR_LATITUDE, KANTOR_LONGITUDE)
     dalam_radius = jarak <= RADIUS_MAKSIMAL_METER
 
-    # Tampilan Metrik Jarak yang Keren
     m1, m2 = st.columns(2)
     with m1:
         st.metric(label="📍 Jarak Anda ke Kantor", value=f"{jarak:.1f} meter")
@@ -342,7 +323,7 @@ if 'user_lat' in st.session_state and 'user_lon' in st.session_state:
         st.session_state['boleh_scan'] = False
 
 # ====================================================
-# 6. PEMINDAIAN QR CODE (DENGAN PROTEKSI GANDA & AUTO-RESET)
+# 6. PEMINDAIAN QR CODE (VALIDASI WAKTU & STATUS)
 # ====================================================
 if st.session_state.get('boleh_scan', False):
     st.markdown("---")
@@ -371,17 +352,28 @@ if st.session_state.get('boleh_scan', False):
             pemilik_sebelumnya = cek_device_sudah_absen(hari_ini, info_perangkat)
             
             if pemilik_sebelumnya:
-                st.error(f"❌ **Akses Ditolak!** Perangkat HP ini sudah digunakan untuk absensi hari ini atas nama **{pemilik_sebelumnya}**. (1 Perangkat = 1 Akun per Hari)")
+                st.error(f"❌ **Akses Ditolak!** Perangkat HP ini sudah digunakan untuk absensi hari ini atas nama **{pemilik_sebelumnya}**.")
             else:
-                status_teks = "Berhasil"
+                # --- LOGIKA PENGECEKAN WAKTU MASUK (08.00) ---
+                waktu_presensi_jam = waktu_sekarang.time()
+                
+                if waktu_presensi_jam <= BATAS_JAM_MASUK:
+                    status_teks = "Terima Kasih Telah Datang Tepat Waktu"
+                else:
+                    status_teks = "Terlambat"
+
+                # Simpan ke Database
                 berhasil = simpan_absen(
                     hari_ini, emp_id, nama_karyawan, waktu_str, 
                     koordinat_str, user_lat, user_lon, jarak, status_teks, info_perangkat
                 )
 
                 if berhasil:
-                    st.balloons()
-                    st.success(f"🎉 Absensi BERHASIL dicatat untuk **{nama_karyawan}** pada pukul {waktu_str} WIB!")
+                    if waktu_presensi_jam <= BATAS_JAM_MASUK:
+                        st.balloons()
+                        st.success(f"🎉 **Terima Kasih Telah Datang Tepat Waktu!**\nAbsensi **{nama_karyawan}** berhasil dicatat pada pukul {waktu_sekarang.strftime('%H:%M:%S')} WIB.")
+                    else:
+                        st.warning(f"⚠️ **Terlambat!**\nAbsensi **{nama_karyawan}** berhasil dicatat pada pukul {waktu_sekarang.strftime('%H:%M:%S')} WIB (Melewati jam 08:00).")
                     
                     # Reset Total Halaman & Kamera
                     for key in ["user_lat", "user_lon", "gps_accuracy", "boleh_scan"]:
@@ -413,7 +405,7 @@ st.write("")
 col1, col2 = st.columns(2)
 with col1:
     waktu_unduh = datetime.now(TZ_WIB).strftime("%Y%m%d_%H%M%S")
-    data_excel = to_excel(df_absent if 'df_absent' in locals() else df_absen)
+    data_excel = to_excel(df_absen)
     st.download_button(
         label="📥 Unduh Laporan (Excel)",
         data=data_excel,
