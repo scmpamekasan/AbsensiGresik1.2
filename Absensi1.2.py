@@ -2,20 +2,23 @@ import streamlit as st
 import pandas as pd
 import cv2
 import numpy as np
+import sqlite3
+import piexif
 from datetime import datetime
 from io import BytesIO
 from PIL import Image
-from math import radians, cos, sin, asin, sqrt
-from streamlit_js_eval import streamlit_js_eval
+import math
 
 # ====================================================
-# CONFIGURASI UTAMA KANTOR
+# CONFIGURASI UTAMA
 # ====================================================
-KANTOR_LAT = -7.310502   # Rungkut Surabaya
-KANTOR_LON = 112.798985  # Rungkut Surabaya
-RADIUS_MAKSIMAL = 100.0  # Batas radius dalam METER
+KODE_QR_SAH = "KANTOR_UTAMA_SECRET_KEY_2026"
 
-KODE_QR_SAH = "KANTOR_UTAMA_SECRET_KEY_2026" 
+# --- PENGATURAN GEOFENCING ---
+# Ganti dengan koordinat kantor Anda yang sebenarnya
+KANTOR_LATITUDE = -6.200000          # Contoh: Jakarta
+KANTOR_LONGITUDE = 106.816666
+RADIUS_MAKSIMAL_METER = 150          # Radius yang diizinkan (meter)
 
 KARYAWAN_DATA = {
     "EMP001": "Eka Sulawestara",
@@ -24,126 +27,338 @@ KARYAWAN_DATA = {
     "EMP004": "Eustacia Redinka Amayra"
 }
 
-def hitung_jarak(lat1, lon1, lat2, lon2):
-    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-    dlon = lon2 - lon1
-    dlat = lat2 - lat1
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-    c = 2 * asin(sqrt(a))
-    r = 6371000 
-    return c * r
-
-if "attendance_db" not in st.session_state:
-    st.session_state.attendance_db = []
+DB_NAME = "absen_master.db"
 
 # ====================================================
-# INTERFACE APLIKASI
+# DATABASE
 # ====================================================
-st.set_page_config(page_title="Absensi QR + GPS iPhone Fix", layout="centered")
-st.title("🔒 Sistem Absensi QR Code Terkunci GPS")
+def inisialisasi_database_sqlite():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS absensi (
+            tanggal TEXT,
+            id_karyawan TEXT,
+            nama TEXT,
+            waktu_presensi TEXT,
+            koordinat_gps TEXT,
+            latitude REAL,
+            longitude REAL,
+            jarak_dari_kantor REAL,
+            status TEXT,
+            sumber_foto TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_absen_unique 
+        ON absensi(tanggal, id_karyawan)
+    """)
+    conn.commit()
+    conn.close()
 
-# Dropdown Karyawan
-emp_id = st.selectbox("Pilih Profil ID Karyawan", list(KARYAWAN_DATA.keys()), format_func=lambda x: f"{x} - {KARYAWAN_DATA[x]}")
+inisialisasi_database_sqlite()
 
-st.write("---")
-st.subheader("📍 Langkah 1: Kunci Koordinat GPS Anda")
+def muat_data_absen():
+    conn = sqlite3.connect(DB_NAME)
+    try:
+        df = pd.read_sql_query("""
+            SELECT 
+                tanggal AS Tanggal, 
+                id_karyawan AS ID, 
+                nama AS Nama, 
+                waktu_presensi AS [Waktu Presensi], 
+                koordinat_gps AS [Koordinat GPS], 
+                latitude AS Latitude, 
+                longitude AS Longitude, 
+                jarak_dari_kantor AS [Jarak (meter)],
+                status AS Status, 
+                sumber_foto AS [Sumber Foto]
+            FROM absensi
+        """, conn)
+        df['Koordinat GPS'] = df['Koordinat GPS'].astype(str)
+    except:
+        df = pd.DataFrame(columns=[
+            "Tanggal", "ID", "Nama", "Waktu Presensi", "Koordinat GPS",
+            "Latitude", "Longitude", "Jarak (meter)", "Status", "Sumber Foto"
+        ])
+    conn.close()
+    return df
 
-# TOMBOL PAKSA REFRESH UNTUK MEMBUNUH PROTEKSI CACHE IPHONE
-if st.button("🛰️ Aktifkan / Segarkan GPS HP Anda", use_container_width=True):
-    st.session_state["trigger_gps"] = True
+def simpan_absen_baru(tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon, jarak, status, sumber_foto):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO absensi 
+            (tanggal, id_karyawan, nama, waktu_presensi, koordinat_gps, latitude, longitude, jarak_dari_kantor, status, sumber_foto)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon, jarak, status, sumber_foto))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
 
-# Pemicu skrip JavaScript dengan opsi High Accuracy ekstra
-js_gps_script = """
-window.navigator.geolocation.getCurrentPosition(
-    function(pos) { 
-        return pos.coords.latitude + ',' + pos.coords.longitude; 
-    }, 
-    function(err) { 
-        return 'ERROR:' + err.message; 
-    }, 
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-);
-"""
+# ====================================================
+# FUNGSI GEOFENCING (Haversine)
+# ====================================================
+def hitung_jarak_meter(lat1, lon1, lat2, lon2):
+    """Menghitung jarak antara dua koordinat dalam meter (Haversine Formula)"""
+    R = 6371000  # Radius bumi dalam meter
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
 
-# Pengambilan lokasi secara langsung
-loc_string = streamlit_js_eval(data_string=js_gps_script, key=f"gps_tracker_iphone_{st.session_state.get('trigger_gps', False)}")
+    a = math.sin(delta_phi / 2)**2 + \
+        math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-user_lat, user_lon, jarak_ke_kantor = None, None, None
-lokasi_terdeteksi = False
+    return R * c
 
-if loc_string:
-    if "ERROR" not in loc_string:
-        try:
-            user_lat, user_lon = map(float, loc_string.split(','))
-            jarak_ke_kantor = hitung_jarak(user_lat, user_lon, KANTOR_LAT, KANTOR_LON)
+# ====================================================
+# FUNGSI GPS
+# ====================================================
+def konversi_ke_derajat_desimal(nilai, referensi):
+    try:
+        derajat = float(nilai[0][0]) / float(nilai[0][1])
+        menit   = float(nilai[1][0]) / float(nilai[1][1])
+        detik   = float(nilai[2][0]) / float(nilai[2][1])
+        desimal = derajat + (menit / 60.0) + (detik / 3600.0)
+        if referensi in ['S', 'W']:
+            desimal = -desimal
+        return desimal
+    except:
+        return None
+
+def ekstrak_gps_dari_foto(bytes_gambar):
+    try:
+        exif_dict = piexif.load(bytes_gambar)
+        gps_data = exif_dict.get("GPS")
+        
+        if not gps_data:
+            return None, None, "GPS Tidak Aktif / Tidak Tersedia"
+        
+        lat_val = gps_data.get(piexif.GPSIFD.GPSLatitude)
+        lat_ref = gps_data.get(piexif.GPSIFD.GPSLatitudeRef)
+        lon_val = gps_data.get(piexif.GPSIFD.GPSLongitude)
+        lon_ref = gps_data.get(piexif.GPSIFD.GPSLongitudeRef)
+        
+        if lat_val and lon_val and lat_ref and lon_ref:
+            lat_ref = lat_ref.decode('utf-8') if isinstance(lat_ref, bytes) else lat_ref
+            lon_ref = lon_ref.decode('utf-8') if isinstance(lon_ref, bytes) else lon_ref
             
-            st.info(f"🔍 [DEBUG] Koordinat HP Anda: {user_lat:.6f}, {user_lon:.6f}")
+            lat = konversi_ke_derajat_desimal(lat_val, lat_ref)
+            lon = konversi_ke_derajat_desimal(lon_val, lon_ref)
             
-            if jarak_ke_kantor <= RADIUS_MAKSIMAL:
-                st.success(f"✅ GPS Terkunci! Jarak Anda ke Kantor: **{jarak_ke_kantor:.1f} meter** (Aman).")
-                lokasi_terdeteksi = True
-            else:
-                st.error(f"❌ GPS Terkunci! Namun Anda berada di luar radius kantor ({jarak_ke_kantor:.1f} meter).")
-                lokasi_terdeteksi = False
-        except:
-            st.warning("⏳ Memproses data koordinat satelit...")
+            if lat is not None and lon is not None:
+                return lat, lon, f"{lat:.6f},{lon:.6f}"
+        
+        return None, None, "GPS Tidak Lengkap"
+    except Exception:
+        return None, None, "Gagal Membaca EXIF GPS"
+
+# ====================================================
+# FUNGSI DETEKSI KAMERA & QR
+# ====================================================
+def deteksi_sumber_foto(nama_file: str) -> str:
+    nama = nama_file.lower()
+    kamera_keywords = ["camera", "captured", "image", "photo", "img_", "cam_"]
+    if any(k in nama for k in kamera_keywords) or nama.startswith("camera"):
+        return "Kamera Langsung"
+    return "Dari Galeri / File"
+
+def proses_gambar_untuk_qr(bytes_data):
+    img = Image.open(BytesIO(bytes_data))
+    img_np = np.array(img)
+    
+    if len(img_np.shape) == 3:
+        if img_np.shape[2] == 4:
+            img_np = cv2.cvtColor(img_np, cv2.COLOR_RGBA2BGR)
+        else:
+            img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
     else:
-        st.error("❌ Safari iPhone memblokir lokasi. Buka Settings -> Safari -> Location -> Allow.")
-else:
-    st.warning("⚠️ Ketuk tombol hitam **'🛰️ Aktifkan / Segarkan GPS HP Anda'** di atas terlebih dahulu agar iPhone mengunci lokasi Anda.")
+        img_np = cv2.cvtColor(img_np, cv2.COLOR_GRAY2BGR)
+    
+    h, w = img_np.shape[:2]
+    if max(h, w) > 1200:
+        scale = 1200 / max(h, w)
+        img_np = cv2.resize(img_np, None, fx=scale, fy=scale)
+    
+    versions = [img_np]
+    gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
+    versions.append(cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR))
+    
+    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                   cv2.THRESH_BINARY, 11, 2)
+    versions.append(cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR))
+    
+    return versions
+
+def scan_qr_code(bytes_data):
+    detector = cv2.QRCodeDetector()
+    versions = proses_gambar_untuk_qr(bytes_data)
+    
+    for img in versions:
+        data, bbox, _ = detector.detectAndDecode(img)
+        if data:
+            return data
+    return None
+
+def to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Master Absensi')
+    return output.getvalue()
+
+# ====================================================
+# INTERFACE
+# ====================================================
+st.set_page_config(page_title="Absensi QR + GPS + Geofencing", layout="centered")
+st.title("🔒 Sistem Absensi QR Code + Geofencing")
+st.caption("Scan QR • Deteksi Kamera • GPS • Geofencing Radius Kantor")
+
+# Tampilkan info geofencing
+with st.expander("📍 Informasi Geofencing Kantor", expanded=False):
+    st.write(f"**Koordinat Kantor:** `{KANTOR_LATITUDE}, {KANTOR_LONGITUDE}`")
+    st.write(f"**Radius Maksimal:** `{RADIUS_MAKSIMAL_METER} meter`")
+    st.caption("Absensi hanya dianggap sah jika Anda berada dalam radius di atas.")
+
+emp_id = st.selectbox(
+    "Pilih Profil ID Karyawan",
+    list(KARYAWAN_DATA.keys()),
+    format_func=lambda x: f"{x} - {KARYAWAN_DATA[x]}"
+)
 
 st.write("---")
-st.subheader("📸 Langkah 2: Pindai QR Code Kantor")
+st.markdown("### 📸 Ambil Foto QR Code Kantor")
 
-# Menggunakan file uploader native kamera iPhone
-picture = st.file_uploader("Ketuk di sini untuk memotret kertas QR Kantor", type=["png", "jpg", "jpeg"])
+st.info("""
+**Syarat Absensi Sah:**
+1. Menggunakan **Kamera Langsung** (bukan dari Galeri)
+2. QR Code resmi kantor terdeteksi
+3. GPS HP aktif
+4. Berada dalam radius **{} meter** dari kantor
+""".format(RADIUS_MAKSIMAL_METER))
+
+picture = st.camera_input("Ambil foto QR Code sekarang")
 
 if picture is not None:
-    # VALIDASI PINDAH KE DALAM TOMBOL SUBMIT UNTUK MEMASTIKAN SYARAT TERPENUHI
-    if not lokasi_terdeteksi or jarak_ke_kantor is None:
-        st.error("❌ Absen Ditolak! GPS Anda belum aktif atau berada di luar area kantor. Sila ketuk tombol 'Segarkan GPS' di atas terlebih dahulu.")
-    else:
-        bytes_data = picture.read()
-        cv_img = Image.open(BytesIO(bytes_data))
-        open_cv_image = np.array(cv_img)
-        
-        if len(open_cv_image.shape) == 3 and open_cv_image.shape[2] == 4:
-            open_cv_image = cv2.cvtColor(open_cv_image, cv2.COLOR_RGBA2RGB)
-        elif len(open_cv_image.shape) == 2:
-            open_cv_image = cv2.cvtColor(open_cv_image, cv2.COLOR_GRAY2RGB)
+    bytes_data = picture.getvalue()
+    nama_file = getattr(picture, "name", "camera_input.jpg")
+    
+    # 1. Deteksi sumber foto
+    sumber_foto = deteksi_sumber_foto(nama_file)
+    
+    # 2. Ekstrak GPS
+    user_lat, user_lon, koordinat_str = ekstrak_gps_dari_foto(bytes_data)
+    
+    # 3. Hitung jarak geofencing
+    jarak = None
+    dalam_radius = False
+    if user_lat is not None and user_lon is not None:
+        jarak = hitung_jarak_meter(user_lat, user_lon, KANTOR_LATITUDE, KANTOR_LONGITUDE)
+        dalam_radius = jarak <= RADIUS_MAKSIMAL_METER
+    
+    # 4. Preview
+    st.image(bytes_data, caption=f"Pratinjau ({sumber_foto})", width=280)
+    
+    # 5. Scan QR
+    with st.spinner("Sedang memindai QR Code & memvalidasi lokasi..."):
+        data_qr = scan_qr_code(bytes_data)
+    
+    if data_qr:
+        if data_qr == KODE_QR_SAH:
+            waktu_sekarang = datetime.now()
+            hari_ini = waktu_sekarang.strftime("%Y-%m-%d")
+            waktu_str = waktu_sekarang.strftime("%Y-%m-%d %H:%M:%S")
             
-        open_cv_image = open_cv_image[:, :, ::-1].copy()
-        
-        st.image(bytes_data, caption="Foto QR Anda", width=200)
-        
-        with st.spinner("Memvalidasi kode QR..."):
-            detector = cv2.QRCodeDetector()
-            data, bbox, straight_qrcode = detector.detectAndDecode(open_cv_image)
-            
-            if data:
-                if data == KODE_QR_SAH:
-                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    sudah_absen = any(d['ID'] == emp_id for d in st.session_state.attendance_db)
-                    
-                    if not sudah_absen:
-                        st.success(f"🎉 ABSEN BERHASIL! Selamat bekerja, {KARYAWAN_DATA[emp_id]}.")
-                        st.session_state.attendance_db.append({
-                            "ID": emp_id,
-                            "Nama": KARYAWAN_DATA[emp_id],
-                            "Waktu Presensi": now_str,
-                            "Jarak": f"{jarak_ke_kantor:.1f}m",
-                            "Status": "Hadir Sah (QR+GPS)"
-                        })
-                    else:
-                        st.warning("⚠️ Anda sudah terdaftar hadir hari ini.")
-                else:
-                    st.error("❌ QR Code Salah! Ini bukan QR Code resmi kantor.")
+            # ===== LOGIKA STATUS + GEOFENCING =====
+            if sumber_foto != "Kamera Langsung":
+                status = "Ditolak - Foto dari Galeri"
+                boleh_simpan = False
+            elif user_lat is None:
+                status = "Ditolak - GPS Tidak Tersedia"
+                boleh_simpan = False
+            elif not dalam_radius:
+                status = f"Ditolak - Di Luar Area Kantor ({jarak:.0f} m)"
+                boleh_simpan = False
             else:
-                st.error("📷 QR Code tidak terbaca. Dekatkan kamera, pastikan fokus dan tidak blur.")
+                status = f"Hadir Sah (Dalam Radius {jarak:.0f} m)"
+                boleh_simpan = True
+            
+            # Simpan hanya jika memenuhi syarat
+            if boleh_simpan:
+                berhasil = simpan_absen_baru(
+                    hari_ini, emp_id, KARYAWAN_DATA[emp_id],
+                    waktu_str, koordinat_str, user_lat, user_lon,
+                    round(jarak, 1), status, sumber_foto
+                )
+                
+                if berhasil:
+                    st.success(f"🎉 ABSENSI BERHASIL!\n\nSelamat bekerja, **{KARYAWAN_DATA[emp_id]}**")
+                    st.write(f"**Status:** {status}")
+                    st.write(f"**Jarak dari Kantor:** {jarak:.1f} meter")
+                    st.info(f"📍 Koordinat: `{koordinat_str}`")
+                else:
+                    st.warning(f"⚠️ {KARYAWAN_DATA[emp_id]} sudah tercatat hadir hari ini.")
+            else:
+                # Tetap bisa dicatat sebagai percobaan gagal (opsional)
+                st.error(f"❌ ABSENSI DITOLAK\n\n**Alasan:** {status}")
+                
+                if jarak is not None:
+                    st.write(f"Jarak Anda saat ini: **{jarak:.1f} meter** dari kantor")
+                    st.write(f"Batas maksimal: **{RADIUS_MAKSIMAL_METER} meter**")
+                
+                # Opsional: tetap simpan data penolakan untuk audit
+                # simpan_absen_baru(..., status, ...) 
+        else:
+            st.error("❌ QR Code tidak valid. Ini bukan QR Code resmi kantor.")
+    else:
+        st.error("📷 QR Code tidak terdeteksi.\n\nTips: Dekatkan kamera, pastikan QR tidak buram, dan pencahayaan cukup.")
 
-# Laporan Absensi
-if st.session_state.attendance_db:
-    st.write("---")
-    st.subheader("📊 Laporan Absensi Hari Ini")
-    df = pd.DataFrame(st.session_state.attendance_db)
-    st.dataframe(df, use_container_width=True)
+# ====================================================
+# PANEL RIWAYAT
+# ====================================================
+st.write("---")
+st.subheader("📊 Master Riwayat Absensi")
+
+df_master = muat_data_absen()
+
+if not df_master.empty:
+    st.dataframe(
+        df_master.sort_values(by="Waktu Presensi", ascending=False),
+        use_container_width=True
+    )
+    
+    # Peta
+    df_peta = df_master.dropna(subset=['Latitude', 'Longitude'])
+    if not df_peta.empty:
+        st.write("### 🗺️ Peta Lokasi Scan Karyawan")
+        st.map(
+            df_peta[['Latitude', 'Longitude']].rename(columns={'Latitude': 'lat', 'Longitude': 'lon'}),
+            zoom=14
+        )
+    
+    # Download
+    st.write("### 📥 Unduh Data")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.download_button(
+            "🟢 Unduh Excel",
+            data=to_excel(df_master),
+            file_name=f"rekap_absen_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    with col2:
+        st.download_button(
+            "🔵 Unduh CSV",
+            data=df_master.to_csv(index=False).encode('utf-8'),
+            file_name=f"rekap_absen_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+else:
+    st.info("Belum ada data absensi.")
