@@ -65,6 +65,7 @@ def inisialisasi_database():
             latitude REAL,
             longitude REAL,
             jarak_dari_kantor REAL,
+            perangkat TEXT,  -- Tambah kolom ini
             status TEXT
         )
     """)
