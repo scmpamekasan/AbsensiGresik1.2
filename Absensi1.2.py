@@ -7,17 +7,22 @@ from datetime import datetime
 from io import BytesIO
 from PIL import Image
 import math
-from streamlit_js_eval import get_geolocation
+
+# Coba import streamlit-js-eval
+try:
+    from streamlit_js_eval import get_geolocation
+    JS_EVAL_AVAILABLE = True
+except ImportError:
+    JS_EVAL_AVAILABLE = False
 
 # ====================================================
 # CONFIGURASI
 # ====================================================
 KODE_QR_SAH = "KANTOR_UTAMA_SECRET_KEY_2026"
 
-# --- GEOFENCING ---
-KANTOR_LATITUDE = -7.259138          # Ganti dengan latitude kantor
-KANTOR_LONGITUDE = 112.696182        # Ganti dengan longitude kantor
-RADIUS_MAKSIMAL_METER = 150          # Radius maksimal (meter)
+KANTOR_LATITUDE = -7.259138          # Ganti dengan koordinat kantor
+KANTOR_LONGITUDE = 112.696182
+RADIUS_MAKSIMAL_METER = 150
 
 KARYAWAN_DATA = {
     "EMP001": "Eka Sulawestara",
@@ -60,16 +65,10 @@ def muat_data_absen():
     conn = sqlite3.connect(DB_NAME)
     try:
         df = pd.read_sql_query("""
-            SELECT 
-                tanggal AS Tanggal, 
-                id_karyawan AS ID, 
-                nama AS Nama, 
-                waktu_presensi AS [Waktu Presensi], 
-                koordinat_gps AS [Koordinat GPS], 
-                latitude AS Latitude, 
-                longitude AS Longitude, 
-                jarak_dari_kantor AS [Jarak (meter)],
-                status AS Status
+            SELECT tanggal AS Tanggal, id_karyawan AS ID, nama AS Nama, 
+                   waktu_presensi AS [Waktu Presensi], koordinat_gps AS [Koordinat GPS], 
+                   latitude AS Latitude, longitude AS Longitude, 
+                   jarak_dari_kantor AS [Jarak (meter)], status AS Status
             FROM absensi
         """, conn)
     except:
@@ -150,14 +149,24 @@ def to_excel(df):
 # ====================================================
 # INTERFACE
 # ====================================================
-st.set_page_config(page_title="Absensi QR + GPS Browser", layout="centered")
-st.title("🔒 Sistem Absensi QR + GPS Akurat")
-st.caption("Menggunakan lokasi GPS langsung dari HP (lebih andal)")
+st.set_page_config(page_title="Absensi QR + GPS", layout="centered")
+st.title("🔒 Sistem Absensi QR + GPS")
 
-# Info Geofencing
-with st.expander("📍 Informasi Geofencing", expanded=False):
-    st.write(f"**Koordinat Kantor:** `{KANTOR_LATITUDE}, {KANTOR_LONGITUDE}`")
-    st.write(f"**Radius Maksimal:** `{RADIUS_MAKSIMAL_METER} meter`")
+if not JS_EVAL_AVAILABLE:
+    st.error("""
+    Library `streamlit-js-eval` belum terinstall.
+    
+    Tambahkan baris ini ke file **requirements.txt**:
+    ```
+    streamlit-js-eval
+    ```
+    Lalu Commit & Push ulang.
+    """)
+    st.stop()
+
+with st.expander("📍 Informasi Geofencing"):
+    st.write(f"Koordinat Kantor: `{KANTOR_LATITUDE}, {KANTOR_LONGITUDE}`")
+    st.write(f"Radius Maksimal: `{RADIUS_MAKSIMAL_METER} meter`")
 
 emp_id = st.selectbox(
     "Pilih Profil ID Karyawan",
@@ -166,115 +175,109 @@ emp_id = st.selectbox(
 )
 
 st.write("---")
-st.markdown("### 1️⃣ Ambil Lokasi GPS Anda")
+st.markdown("### 1️⃣ Ambil Lokasi GPS")
 
-# Tombol ambil lokasi
+st.info("Pastikan GPS HP aktif dan Anda mengizinkan akses lokasi saat browser meminta izin.")
+
 if st.button("📍 Ambil Lokasi GPS Saya", use_container_width=True, type="primary"):
-    loc = get_geolocation()
-    
-    if loc and loc.get("coords"):
-        st.session_state['user_lat'] = loc["coords"]["latitude"]
-        st.session_state['user_lon'] = loc["coords"]["longitude"]
-        st.session_state['gps_accuracy'] = loc["coords"].get("accuracy", None)
-        st.success("Lokasi berhasil diambil!")
-        st.rerun()
-    else:
-        st.error("Gagal mengambil lokasi. Pastikan Anda mengizinkan akses lokasi di browser.")
+    with st.spinner("Mengambil lokasi... Mohon izinkan akses lokasi di browser"):
+        try:
+            loc = get_geolocation()
+            
+            if loc and isinstance(loc, dict) and loc.get("coords"):
+                st.session_state['user_lat'] = loc["coords"]["latitude"]
+                st.session_state['user_lon'] = loc["coords"]["longitude"]
+                st.session_state['gps_accuracy'] = loc["coords"].get("accuracy")
+                st.success("Lokasi berhasil diambil!")
+                st.rerun()
+            else:
+                st.error("Gagal mendapatkan koordinat. Coba lagi dan pastikan menekan tombol **Allow/Izinkan** saat browser meminta izin lokasi.")
+        except Exception as e:
+            st.error(f"Terjadi kesalahan: {str(e)}")
 
-# Tampilkan hasil GPS jika sudah ada
+# Tampilkan hasil GPS
 if 'user_lat' in st.session_state and 'user_lon' in st.session_state:
     user_lat = st.session_state['user_lat']
     user_lon = st.session_state['user_lon']
     jarak = hitung_jarak_meter(user_lat, user_lon, KANTOR_LATITUDE, KANTOR_LONGITUDE)
     dalam_radius = jarak <= RADIUS_MAKSIMAL_METER
-    
-    st.write(f"**Koordinat Anda:** `{user_lat:.6f}, {user_lon:.6f}`")
+
+    st.success("Lokasi berhasil didapatkan")
+    st.write(f"**Koordinat:** `{user_lat:.6f}, {user_lon:.6f}`")
     st.write(f"**Jarak dari Kantor:** `{jarak:.1f} meter`")
-    
+
     if dalam_radius:
-        st.success(f"✅ Anda berada dalam radius kantor ({jarak:.1f} m)")
+        st.success(f"✅ Anda berada dalam radius yang diizinkan")
         st.session_state['boleh_scan'] = True
     else:
-        st.error(f"❌ Anda berada di luar radius kantor ({jarak:.1f} m). Maksimal {RADIUS_MAKSIMAL_METER} meter.")
+        st.error(f"❌ Anda di luar radius kantor ({jarak:.1f} m). Maksimal {RADIUS_MAKSIMAL_METER} meter.")
         st.session_state['boleh_scan'] = False
 else:
-    st.info("Silakan tekan tombol di atas untuk mengambil lokasi GPS Anda terlebih dahulu.")
     st.session_state['boleh_scan'] = False
 
 # ====================================================
-# BAGIAN SCAN QR (hanya muncul jika dalam radius)
+# SCAN QR
 # ====================================================
 if st.session_state.get('boleh_scan', False):
     st.write("---")
     st.markdown("### 2️⃣ Scan QR Code Kantor")
-    
-    picture = st.camera_input("Ambil foto QR Code sekarang")
-    
+
+    picture = st.camera_input("Ambil foto QR Code")
+
     if picture is not None:
         bytes_data = picture.getvalue()
-        st.image(bytes_data, caption="Pratinjau Foto QR", width=280)
-        
-        with st.spinner("Sedang memindai QR Code..."):
+        st.image(bytes_data, caption="Pratinjau", width=280)
+
+        with st.spinner("Memindai QR Code..."):
             data_qr = scan_qr_code(bytes_data)
-        
-        if data_qr:
-            if data_qr == KODE_QR_SAH:
-                waktu_sekarang = datetime.now()
-                hari_ini = waktu_sekarang.strftime("%Y-%m-%d")
-                waktu_str = waktu_sekarang.strftime("%Y-%m-%d %H:%M:%S")
-                
-                koordinat_str = f"{user_lat:.6f},{user_lon:.6f}"
-                status = f"Hadir Sah (GPS Browser - {jarak:.0f} m)"
-                
-                berhasil = simpan_absen(
-                    hari_ini, emp_id, KARYAWAN_DATA[emp_id],
-                    waktu_str, koordinat_str, user_lat, user_lon,
-                    round(jarak, 1), status
-                )
-                
-                if berhasil:
-                    st.success(f"🎉 ABSENSI BERHASIL!\n\nSelamat bekerja, **{KARYAWAN_DATA[emp_id]}**")
-                    st.write(f"**Status:** {status}")
-                    st.info(f"📍 Koordinat: `{koordinat_str}`")
-                else:
-                    st.warning(f"⚠️ {KARYAWAN_DATA[emp_id]} sudah tercatat hadir hari ini.")
+
+        if data_qr == KODE_QR_SAH:
+            waktu_sekarang = datetime.now()
+            hari_ini = waktu_sekarang.strftime("%Y-%m-%d")
+            waktu_str = waktu_sekarang.strftime("%Y-%m-%d %H:%M:%S")
+            koordinat_str = f"{user_lat:.6f},{user_lon:.6f}"
+            status = f"Hadir Sah ({jarak:.0f} m)"
+
+            berhasil = simpan_absen(
+                hari_ini, emp_id, KARYAWAN_DATA[emp_id],
+                waktu_str, koordinat_str, user_lat, user_lon,
+                round(jarak, 1), status
+            )
+
+            if berhasil:
+                st.success(f"🎉 ABSENSI BERHASIL!\n\nSelamat bekerja, **{KARYAWAN_DATA[emp_id]}**")
+                st.write(f"**Status:** {status}")
             else:
-                st.error("❌ QR Code tidak valid.")
+                st.warning(f"⚠️ {KARYAWAN_DATA[emp_id]} sudah absen hari ini.")
+        elif data_qr:
+            st.error("QR Code tidak valid.")
         else:
-            st.error("📷 QR Code tidak terdeteksi. Coba lagi dengan posisi lebih dekat dan stabil.")
+            st.error("QR Code tidak terdeteksi. Coba lagi.")
 
 # ====================================================
 # RIWAYAT
 # ====================================================
 st.write("---")
-st.subheader("📊 Master Riwayat Absensi")
+st.subheader("📊 Riwayat Absensi")
 
 df_master = muat_data_absen()
 
 if not df_master.empty:
     st.dataframe(df_master.sort_values(by="Waktu Presensi", ascending=False), use_container_width=True)
-    
+
     df_peta = df_master.dropna(subset=['Latitude', 'Longitude'])
     if not df_peta.empty:
-        st.write("### 🗺️ Peta Lokasi")
         st.map(df_peta[['Latitude', 'Longitude']].rename(columns={'Latitude': 'lat', 'Longitude': 'lon'}), zoom=14)
-    
+
     col1, col2 = st.columns(2)
     with col1:
-        st.download_button(
-            "🟢 Unduh Excel",
-            data=to_excel(df_master),
-            file_name=f"rekap_absen_{datetime.now().strftime('%Y%m%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+        st.download_button("🟢 Unduh Excel", data=to_excel(df_master),
+                           file_name=f"rekap_absen_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           use_container_width=True)
     with col2:
-        st.download_button(
-            "🔵 Unduh CSV",
-            data=df_master.to_csv(index=False).encode('utf-8'),
-            file_name=f"rekap_absen_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
+        st.download_button("🔵 Unduh CSV", data=df_master.to_csv(index=False).encode('utf-8'),
+                           file_name=f"rekap_absen_{datetime.now().strftime('%Y%m%d')}.csv",
+                           mime="text/csv", use_container_width=True)
 else:
     st.info("Belum ada data absensi.")
