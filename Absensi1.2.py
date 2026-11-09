@@ -7,6 +7,7 @@ from datetime import datetime
 from io import BytesIO
 from PIL import Image
 import math
+import pytz
 
 # Proteksi impor untuk streamlit-js-eval
 try:
@@ -239,7 +240,9 @@ if st.session_state.get('boleh_scan', False):
             data_qr = scan_qr_code(bytes_data)
 
         if data_qr == KODE_QR_SAH:
-            waktu_sekarang = datetime.now()
+            tz_wib = pytz.timezone('Asia/Jakarta')
+            waktu_sekarang = datetime.now(tz_wib)
+
             hari_ini = waktu_sekarang.strftime("%Y-%m-%d")
             waktu_str = waktu_sekarang.strftime("%Y-%m-%d %H:%M:%S")
             koordinat_str = f"{user_lat:.6f},{user_lon:.6f}"
