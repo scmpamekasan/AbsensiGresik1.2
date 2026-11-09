@@ -21,8 +21,8 @@ except ImportError:
 KODE_QR_SAH = "KANTOR_UTAMA_SECRET_KEY_2026"
 
 # Koordinat Kantor (Silakan sesuaikan dengan lokasi kantor Anda)
-KANTOR_LATITUDE = -7.259138          
-KANTOR_LONGITUDE = 112.696182
+KANTOR_LATITUDE = -7.182355          
+KANTOR_LONGITUDE = 112.649103
 RADIUS_MAKSIMAL_METER = 150
 
 # Data Karyawan Terdaftar
