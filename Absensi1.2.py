@@ -218,7 +218,7 @@ def to_excel(df):
 # 5. ANTARMUKA PENGGUNA (STREAMLIT INTERFACE)
 # ====================================================
 st.set_page_config(page_title="Absensi QR + GPS", layout="centered")
-st.title("🔒 Sistem Absensi QR + GPS")
+st.title("Absensi Team Bermalam Gresik Kota")
 
 if not JS_EVAL_AVAILABLE:
     st.error("""
