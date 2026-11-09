@@ -262,8 +262,9 @@ if st.session_state.get('boleh_scan', False):
                 st.warning(f"⚠️ **{nama_karyawan}** sudah melakukan absensi hari ini ({hari_ini}). Data duplikat ditolak oleh sistem.")
         else:
             st.error("❌ QR Code tidak valid atau tidak terdeteksi! Pastikan kode tegak lurus dan pencahayaan cukup.")
+
 # ====================================================
-# 6. PANEL ADMIN (RIWAYAT & DOWNLOAD & RESET TOTAL)
+# 6. PANEL ADMIN (RIWAYAT, DOWNLOAD & PROTECTED RESET)
 # ====================================================
 st.write("---")
 st.markdown("### 📊 Panel Monitoring Absensi (Real-time)")
@@ -278,7 +279,7 @@ else:
 
 st.write("") # Memberi jarak spasial kecil
 
-# PERBAIKAN: Tombol dipasang di luar "if" agar SELALU MUNCUL setiap saat
+# Tombol dipasang di luar "if" agar SELALU MUNCUL setiap saat
 col1, col2 = st.columns(2)
 with col1:
     waktu_unduh = datetime.now(TZ_WIB).strftime("%Y%m%d_%H%M%S")
@@ -292,12 +293,36 @@ with col1:
     )
     
 with col2:
+    # Mengaktifkan trigger konfirmasi saat tombol ditekan
     if st.button("🗑️ Reset Semua Log Absensi", type="primary", use_container_width=True):
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM absensi")
-        conn.commit()
-        conn.close()
-        
-        st.success("🗑️ Seluruh riwayat log absensi berhasil dibersihkan secara permanen!")
-        st.rerun()
+        st.session_state['konfirmasi_reset'] = True
+
+# Alur Input Password Admin (Hanya muncul jika tombol reset diklik)
+if st.session_state.get('konfirmasi_reset', False):
+    st.write("")
+    st.warning("⚠️ **PERINGATAN:** Tindakan ini akan menghapus seluruh data riwayat absensi secara permanen.")
+    
+    # Kolom input text tersamar untuk password
+    input_pass = st.text_input("Masukkan Password Admin:", type="password", key="pass_reset_admin")
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("❌ Batalkan", use_container_width=True, key="btn_batal_reset"):
+            st.session_state['konfirmasi_reset'] = False
+            st.rerun()
+            
+    with c2:
+        if st.button("🔥 Konfirmasi Hapus Total", type="primary", use_container_width=True, key="btn_eksekusi_reset"):
+            # Batasi dengan password keamanan admin Anda (bisa diganti "admin123" sesuai keinginan)
+            if input_pass == "admin123":
+                conn = sqlite3.connect(DB_NAME)
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM absensi")
+                conn.commit()
+                conn.close()
+                
+                st.session_state['konfirmasi_reset'] = False
+                st.success("🗑️ Seluruh riwayat log absensi berhasil dibersihkan secara permanen!")
+                st.rerun()
+            else:
+                st.error("❌ Password Admin salah! Data gagal dihapus.")
