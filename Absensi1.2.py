@@ -27,10 +27,21 @@ RADIUS_MAKSIMAL_METER = 150
 
 # Data Karyawan Terdaftar
 KARYAWAN_DATA = {
-    "EMP001": "Eka Sulawestara",
-    "EMP002": "Diny Herlita",
-    "EMP003": "Eureka Annisa Naira",
-    "EMP004": "Eustacia Redinka Amayra"
+    "05001908": "Lila Aditya Perdana",
+    "05002370": "Hendra",
+    "05002934": "Arif Yuliadi",
+    "05003750": "Septian Chandra",
+    "05003758": "Alfian Nurhuda",
+    "05003750": "Septian Chandra",
+    "05004639": "Budi Setyawan",
+    "05004711": "Khoirul Rijal",
+    "05005032": "Maxbafasya Aditya Wibowo",
+    "05005331": "Dwi Nor Fais",
+    "05007005": "Rachmad Dani",
+    "05007150": "Lurico Umar Raffsanjani",
+    "05007173": "Diska Akbar Hermanto",
+    "05007712": "Nur Nuhammad Khoirul Firmansyah",
+    "05008111": "Mohammad Holidi",
 }
 
 DB_NAME = "absen_master.db"
