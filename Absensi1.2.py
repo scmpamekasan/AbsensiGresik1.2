@@ -278,7 +278,7 @@ def to_excel(df):
 # 5. HEADER & TAMPILAN UTAMA (UI MODERN)
 # ====================================================
 st.markdown("<h1 style='text-align: center; margin-bottom: 5px;'>🏢 Absensi Karyawan Team Gresik Kota</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #64748b; margin-bottom: 30px;'>"Ojo Telat & Ojo Mbujuk</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #64748b; margin-bottom: 30px;'>Ojo Telat & Ojo Mbujuk</p>", unsafe_allow_html=True)
 
 if not JS_EVAL_AVAILABLE:
     st.error("Library `streamlit-js-eval` belum terinstall di requirements.txt!")
