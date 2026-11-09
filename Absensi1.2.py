@@ -20,7 +20,60 @@ except ImportError:
 TZ_WIB = pytz.timezone('Asia/Jakarta')
 
 # ====================================================
-# 1. KONFIGURASI UTAMA KANTOR & DATA
+# 1. KONFIGURASI HALAMAN & CUSTOM CSS STYLING
+# ====================================================
+st.set_page_config(
+    page_title="Sistem Absensi Pintar - Kantor Utama",
+    page_icon="🏢",
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
+
+# Menambahkan CSS Kustom untuk Tampilan yang Modern & Keren
+st.markdown("""
+    <style>
+    /* Mengubah background utama */
+    .stApp {
+        background-color: #f8fafc;
+    }
+    
+    /* Styling Header Utama */
+    h1 {
+        color: #1e293b;
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+    }
+    
+    /* Styling Card/Container Kustom */
+    .custom-card {
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        margin-bottom: 20px;
+        border: 1px solid #e2e8f0;
+    }
+    
+    /* Styling Tombol */
+    .stButton>button {
+        border-radius: 8px;
+        font-weight: 600;
+        transition: all 0.2s ease-in-out;
+    }
+    
+    /* Styling DataFrame */
+    div[data-testid="stDataFrame"] {
+        border-radius: 10px;
+        overflow: hidden;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# ====================================================
+# 2. KONFIGURASI DATA KANTOR & DATABASE
 # ====================================================
 KODE_QR_SAH = "KANTOR_UTAMA_SECRET_KEY_2026"
 
@@ -49,9 +102,7 @@ KARYAWAN_DATA = {
 
 DB_NAME = "absen_master.db"
 
-# ====================================================
-# 2. INISIALISASI SESSION STATE COUNTER
-# ====================================================
+# Inisialisasi Counter Reset
 if 'counter_reset' not in st.session_state:
     st.session_state['counter_reset'] = 0
 
@@ -76,7 +127,6 @@ def inisialisasi_database():
         )
     """)
     
-    # Migrasi otomatis jika kolom device_info belum ada pada database lama
     cursor.execute("PRAGMA table_info(absensi)")
     kolom = [kol[1] for kol in cursor.fetchall()]
     if "device_info" not in kolom:
@@ -113,7 +163,6 @@ def muat_data_absen():
     return df
 
 def cek_device_sudah_absen(tanggal, device_info):
-    """Mengecek apakah HP/Device tertentu sudah pernah dipakai absen pada hari ini"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
@@ -141,7 +190,7 @@ def simpan_absen(tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon, jara
         conn.close()
 
 # ====================================================
-# 4. FUNGSI BANTU (GEOFENCING, QR & DEVICE PARSER)
+# 4. FUNGSI BANTU
 # ====================================================
 def hitung_jarak_meter(lat1, lon1, lat2, lon2):
     R = 6371000  
@@ -226,22 +275,15 @@ def to_excel(df):
     return output.getvalue()
 
 # ====================================================
-# 5. ANTARMUKA PENGGUNA (STREAMLIT INTERFACE)
+# 5. HEADER & TAMPILAN UTAMA (UI MODERN)
 # ====================================================
-st.set_page_config(page_title="Absensi QR + GPS", layout="centered")
-st.title("🔒 Sistem Absensi QR + GPS")
+st.markdown("<h1 style='text-align: center; margin-bottom: 5px;'>🏢 Portal Absensi Karyawan</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #64748b; margin-bottom: 30px;'>Sistem Verifikasi Kehadiran Berbasis Geofencing & QR Code Terpadu</p>", unsafe_allow_html=True)
 
 if not JS_EVAL_AVAILABLE:
-    st.error("""
-    Library `streamlit-js-eval` belum terinstall.
-    Tambahkan baris ini ke file **requirements.txt**:
-    ```
-    streamlit-js-eval
-    ```
-    """)
+    st.error("Library `streamlit-js-eval` belum terinstall di requirements.txt!")
     st.stop()
 
-# Ambil User-Agent dari header browser untuk identifikasi HP
 user_agent_header = ""
 try:
     if hasattr(st, "context") and hasattr(st.context, "headers"):
@@ -249,20 +291,25 @@ try:
 except Exception:
     pass
 
-with st.expander("📍 Informasi Geofencing Kantor"):
-    st.write(f"Koordinat Pusat: `{KANTOR_LATITUDE}, {KANTOR_LONGITUDE}`")
-    st.write(f"Batas Radius: `{RADIUS_MAKSIMAL_METER} meter`")
+# Expander Informasi Kantor yang Lebih Rapi
+with st.expander("📍 Informasi Radius & Lokasi Kantor"):
+    col_exp1, col_exp2 = st.columns(2)
+    with col_exp1:
+        st.markdown(f"**Koordinat Pusat:**\n`{KANTOR_LATITUDE}, {KANTOR_LONGITUDE}`")
+    with col_exp2:
+        st.markdown(f"**Batas Maksimal Radius:**\n`{RADIUS_MAKSIMAL_METER} meter`")
 
-# Dropdown Karyawan
+# Pemilihan Profil Karyawan dengan Tampilan Card
+st.markdown("### 👤 Identitas Karyawan")
 emp_id = st.selectbox(
-    "Pilih Profil ID Karyawan",
+    "Pilih Profil ID Karyawan Anda",
     list(KARYAWAN_DATA.keys()),
-    format_func=lambda x: f"{x} - {KARYAWAN_DATA[x]}"
+    format_func=lambda x: f"{x} — {KARYAWAN_DATA[x]}"
 )
 
-st.write("---")
+st.write("")
 st.markdown("### 1️⃣ Verifikasi Lokasi GPS")
-st.info("Aplikasi memerlukan akses lokasi. Harap pilih **Allow/Izinkan** jika browser memunculkan pop-up permintaan lokasi.")
+st.info("💡 Pastikan GPS perangkat Anda aktif dan berikan izin akses lokasi (*Allow*) pada browser.")
 
 loc = get_geolocation()
 
@@ -271,7 +318,7 @@ if loc and isinstance(loc, dict) and loc.get("coords"):
     st.session_state['user_lon'] = loc["coords"]["longitude"]
     st.session_state['gps_accuracy'] = loc["coords"].get("accuracy")
 else:
-    st.warning("⏳ Menunggu koordinat GPS terdeteksi oleh browser... Pastikan GPS HP/Laptop Anda aktif.")
+    st.warning("⏳ Menunggu sinyal koordinat GPS dari perangkat Anda...")
     st.session_state['boleh_scan'] = False
 
 if 'user_lat' in st.session_state and 'user_lon' in st.session_state:
@@ -280,33 +327,35 @@ if 'user_lat' in st.session_state and 'user_lon' in st.session_state:
     jarak = hitung_jarak_meter(user_lat, user_lon, KANTOR_LATITUDE, KANTOR_LONGITUDE)
     dalam_radius = jarak <= RADIUS_MAKSIMAL_METER
 
-    st.success("🎯 Lokasi GPS terdeteksi!")
-    st.write(f"**Koordinat Anda:** `{user_lat:.6f}, {user_lon:.6f}`")
-    st.write(f"**Jarak ke Kantor:** `{jarak:.1f} meter`")
+    # Tampilan Metrik Jarak yang Keren
+    m1, m2 = st.columns(2)
+    with m1:
+        st.metric(label="📍 Jarak Anda ke Kantor", value=f"{jarak:.1f} meter")
+    with m2:
+        st.metric(label="🎯 Batas Maksimal", value=f"{RADIUS_MAKSIMAL_METER} meter")
 
     if dalam_radius:
-        st.success("✅ Lokasi Valid! Anda berada di dalam wilayah radius kantor.")
+        st.success("✅ **Lokasi Valid!** Anda berada di dalam wilayah jangkauan operasional kantor.")
         st.session_state['boleh_scan'] = True
     else:
-        st.error(f"❌ Lokasi Ditolak! Jarak Anda ({jarak:.1f} m) melebihi batas operasional {RADIUS_MAKSIMAL_METER} meter.")
+        st.error(f"❌ **Lokasi Ditolak!** Jarak Anda ({jarak:.1f} m) berada di luar batas operasional kantor ({RADIUS_MAKSIMAL_METER} m).")
         st.session_state['boleh_scan'] = False
 
 # ====================================================
 # 6. PEMINDAIAN QR CODE (DENGAN PROTEKSI GANDA & AUTO-RESET)
 # ====================================================
 if st.session_state.get('boleh_scan', False):
-    st.write("---")
+    st.markdown("---")
     st.markdown("### 2️⃣ Pindai QR Code Kantor")
     
-    # Key kamera dinamis agar komponen otomatis hancur & bersih saat di-reset
     dynamic_camera_key = f"kamera_absen_{st.session_state['counter_reset']}"
     picture = st.camera_input("Arahkan kamera ke QR Code Resmi Kantor", key=dynamic_camera_key)
 
     if picture is not None:
         bytes_data = picture.getvalue()
-        st.image(bytes_data, caption="Pratinjau Foto Absen", width=280)
+        st.image(bytes_data, caption="Pratinjau Foto Presensi", width=280)
 
-        with st.spinner("Memproses pemindaian QR..."):
+        with st.spinner("Memproses enkripsi dan pemindaian QR..."):
             data_qr = scan_qr_code(bytes_data)
 
         if data_qr == KODE_QR_SAH:
@@ -318,13 +367,12 @@ if st.session_state.get('boleh_scan', False):
             
             info_perangkat = parsing_device_info(user_agent_header)
 
-            # 🛑 VALIDASI 1: Cek apakah HP ini sudah dipakai absen hari ini oleh siapa pun
+            # Validasi Proteksi HP Ganda
             pemilik_sebelumnya = cek_device_sudah_absen(hari_ini, info_perangkat)
             
             if pemilik_sebelumnya:
-                st.error(f"❌ **Akses Ditolak!** Perangkat HP ini sudah digunakan untuk melakukan absensi hari ini atas nama **{pemilik_sebelumnya}**. 1 HP hanya dapat digunakan untuk 1 kali absensi per hari.")
+                st.error(f"❌ **Akses Ditolak!** Perangkat HP ini sudah digunakan untuk absensi hari ini atas nama **{pemilik_sebelumnya}**. (1 Perangkat = 1 Akun per Hari)")
             else:
-                # Eksekusi penyimpanan ke SQLite (Diproteksi juga oleh Unique Index ID Karyawan)
                 status_teks = "Hadir Tepat Radius"
                 berhasil = simpan_absen(
                     hari_ini, emp_id, nama_karyawan, waktu_str, 
@@ -333,42 +381,41 @@ if st.session_state.get('boleh_scan', False):
 
                 if berhasil:
                     st.balloons()
-                    st.success(f"🎉 Absensi BERHASIL dicatat untuk **{nama_karyawan}** pada {waktu_str} WIB!")
+                    st.success(f"🎉 Absensi BERHASIL dicatat untuk **{nama_karyawan}** pada pukul {waktu_str} WIB!")
                     
-                    # --- RESET TOTAL HALAMAN & KAMERA ---
+                    # Reset Total Halaman & Kamera
                     for key in ["user_lat", "user_lon", "gps_accuracy", "boleh_scan"]:
                         if key in st.session_state:
                             del st.session_state[key]
                     
-                    # Naikkan counter agar widget kamera diperbarui total (bersih dari foto sebelumnya)
                     st.session_state['counter_reset'] += 1
                     st.rerun()
                 else:
-                    st.warning(f"⚠️ **{nama_karyawan}** sudah melakukan absensi hari ini ({hari_ini}). Data duplikat ditolak oleh sistem.")
+                    st.warning(f"⚠️ **{nama_karyawan}** sudah melakukan absensi sebelumnya hari ini ({hari_ini}). Data duplikat ditolak.")
         else:
-            st.error("❌ QR Code tidak valid atau tidak terdeteksi! Pastikan kode tegak lurus dan pencahayaan cukup.")
+            st.error("❌ **QR Code Tidak Valid!** Pastikan posisi tegak lurus, fokus, dan pencahayaan cukup terang.")
 
 # ====================================================
-# 7. PANEL ADMIN (RIWAYAT, DOWNLOAD & PROTECTED RESET)
+# 7. PANEL ADMIN (MONITORING & EXPORT)
 # ====================================================
-st.write("---")
-st.markdown("### 📊 Panel Monitoring Absensi (Real-time)")
+st.markdown("---")
+st.markdown("### 📊 Panel Monitoring Absensi Real-time")
 
 df_absen = muat_data_absen()
 
 if not df_absen.empty:
     st.dataframe(df_absen, use_container_width=True)
 else:
-    st.info("Belum ada riwayat data presensi karyawan yang tercatat di database.")
+    st.info("📭 Belum ada riwayat data presensi karyawan yang tercatat untuk hari ini.")
 
 st.write("") 
 
 col1, col2 = st.columns(2)
 with col1:
     waktu_unduh = datetime.now(TZ_WIB).strftime("%Y%m%d_%H%M%S")
-    data_excel = to_excel(df_absen)
+    data_excel = to_excel(df_absent if 'df_absent' in locals() else df_absen)
     st.download_button(
-        label="📥 Unduh Seluruh Riwayat Absensi (Excel)",
+        label="📥 Unduh Laporan (Excel)",
         data=data_excel,
         file_name=f"log_absensi_{waktu_unduh}_WIB.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -376,23 +423,23 @@ with col1:
     )
     
 with col2:
-    if st.button("🗑️ Reset Semua Log Absensi", type="primary", use_container_width=True):
+    if st.button("🗑️ Reset Semua Log Absensi", type="secondary", use_container_width=True):
         st.session_state['konfirmasi_reset'] = True
 
 if st.session_state.get('konfirmasi_reset', False):
     st.write("")
-    st.warning("⚠️ **PERINGATAN:** Tindakan ini akan menghapus seluruh data riwayat absensi secara permanen.")
+    st.warning("⚠️ **PERINGATAN:** Tindakan ini bersifat destruktif dan akan menghapus seluruh data riwayat absensi secara permanen.")
     
-    input_pass = st.text_input("Masukkan Password Admin:", type="password", key="pass_reset_admin")
+    input_pass = st.text_input("Masukkan Password Keamanan Admin:", type="password", key="pass_reset_admin")
     
-    c1, c2 = st.columns(2)
-    with c1:
+    c_sub1, c_sub2 = st.columns(2)
+    with c_sub1:
         if st.button("❌ Batalkan", use_container_width=True, key="btn_batal_reset"):
             st.session_state['konfirmasi_reset'] = False
             st.rerun()
             
-    with c2:
-        if st.button("🔥 Konfirmasi Hapus Total", type="primary", use_container_width=True, key="btn_eksekusi_reset"):
+    with c_sub2:
+        if st.button("🔥 Hapus Permanen Sekarang", type="primary", use_container_width=True, key="btn_eksekusi_reset"):
             if input_pass == "admin123":
                 conn = sqlite3.connect(DB_NAME)
                 cursor = conn.cursor()
@@ -404,4 +451,4 @@ if st.session_state.get('konfirmasi_reset', False):
                 st.success("🗑️ Seluruh riwayat log absensi berhasil dibersihkan secara permanen!")
                 st.rerun()
             else:
-                st.error("❌ Password Admin salah! Data gagal dihapus.")
+                st.error("❌ Password Admin salah! Aksi dibatalkan.")
