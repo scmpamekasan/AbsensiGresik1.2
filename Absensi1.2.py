@@ -65,9 +65,18 @@ def inisialisasi_database():
             latitude REAL,
             longitude REAL,
             jarak_dari_kantor REAL,
-            status TEXT
+            status TEXT,
+            device_info TEXT
         )
     """)
+    
+    # Cek jika kolom 'device_info' belum ada pada tabel lama (migrasi otomatis)
+    cursor.execute("PRAGMA table_info(absensi)")
+    kolom = [kol[1] for kol in cursor.fetchall()]
+    if "device_info" not in kolom:
+        cursor.execute("ALTER TABLE absensi ADD COLUMN device_info TEXT")
+        conn.commit()
+
     cursor.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS idx_absen_unique 
         ON absensi(tanggal, id_karyawan)
@@ -85,27 +94,28 @@ def muat_data_absen():
             SELECT tanggal AS Tanggal, id_karyawan AS ID, nama AS Nama, 
                    waktu_presensi AS [Waktu Presensi], koordinat_gps AS [Koordinat GPS], 
                    latitude AS Latitude, longitude AS Longitude, 
-                   jarak_dari_kantor AS [Jarak (meter)], status AS Status
+                   jarak_dari_kantor AS [Jarak (meter)], status AS Status,
+                   device_info AS [Perangkat HP/Browser]
             FROM absensi
             ORDER BY waktu_presensi DESC
         """, conn)
     except:
         df = pd.DataFrame(columns=[
             "Tanggal", "ID", "Nama", "Waktu Presensi", "Koordinat GPS",
-            "Latitude", "Longitude", "Jarak (meter)", "Status"
+            "Latitude", "Longitude", "Jarak (meter)", "Status", "Perangkat HP/Browser"
         ])
     conn.close()
     return df
 
-def simpan_absen(tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon, jarak, status):
+def simpan_absen(tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon, jarak, status, device_info):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     try:
         cursor.execute("""
             INSERT INTO absensi 
-            (tanggal, id_karyawan, nama, waktu_presensi, koordinat_gps, latitude, longitude, jarak_dari_kantor, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon, jarak, status))
+            (tanggal, id_karyawan, nama, waktu_presensi, koordinat_gps, latitude, longitude, jarak_dari_kantor, status, device_info)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (tanggal, emp_id, nama, waktu_str, koordinat_str, lat, lon, jarak, status, device_info))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -131,7 +141,7 @@ def proses_gambar_untuk_qr(bytes_data):
     img_np = np.array(img)
     
     if len(img_np.shape) == 3:
-        if img_np.shape == 4:
+        if img_np.shape[2] == 4:
             img_np = cv2.cvtColor(img_np, cv2.COLOR_RGBA2BGR)
         else:
             img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
@@ -158,6 +168,43 @@ def scan_qr_code(bytes_data):
             return data
     return None
 
+def parsing_device_info(ua_string):
+    """Meringkas User Agent browser agar mudah dibaca di tabel Excel/UI"""
+    if not ua_string:
+        return "Unknown Device"
+    
+    ua_lower = ua_string.lower()
+    os_name = "Desktop / PC Lain"
+    browser_name = "Browser Lain"
+
+    # Deteksi OS
+    if "iphone" in ua_lower:
+        os_name = "iOS (iPhone)"
+    elif "ipad" in ua_lower:
+        os_name = "iOS (iPad)"
+    elif "android" in ua_lower:
+        os_name = "Android"
+    elif "windows" in ua_lower:
+        os_name = "Windows"
+    elif "macintosh" in ua_lower or "mac os" in ua_lower:
+        os_name = "MacOS"
+    elif "linux" in ua_lower:
+        os_name = "Linux"
+
+    # Deteksi Browser
+    if "edg" in ua_lower:
+        browser_name = "Edge"
+    elif "chrome" in ua_lower and "chromium" not in ua_lower:
+        browser_name = "Chrome"
+    elif "safari" in ua_lower and "chrome" not in ua_lower:
+        browser_name = "Safari"
+    elif "firefox" in ua_lower:
+        browser_name = "Firefox"
+    elif "whatsapp" in ua_lower:
+        browser_name = "WhatsApp In-App Browser"
+
+    return f"{os_name} - {browser_name}"
+
 def to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -177,9 +224,16 @@ if not JS_EVAL_AVAILABLE:
     ```
     streamlit-js-eval
     ```
-    Lalu Commit & Push ulang repositori Anda.
     """)
     st.stop()
+
+# Ambil informasi User Agent (Perangkat & Browser) dari Header HTTP Streamlit
+user_agent_header = ""
+try:
+    if hasattr(st, "context") and hasattr(st.context, "headers"):
+        user_agent_header = st.context.headers.get("User-Agent", "")
+except Exception:
+    pass
 
 with st.expander("📍 Informasi Geofencing Kantor"):
     st.write(f"Koordinat Pusat: `{KANTOR_LATITUDE}, {KANTOR_LONGITUDE}`")
@@ -248,11 +302,14 @@ if st.session_state.get('boleh_scan', False):
             koordinat_str = f"{user_lat:.6f},{user_lon:.6f}"
             status_teks = "Hadir Tepat Radius"
             nama_karyawan = KARYAWAN_DATA[emp_id]
+            
+            # Ringkas info perangkat
+            info_perangkat = parsing_device_info(user_agent_header)
 
             # Eksekusi penyimpanan ke SQLite Database
             berhasil = simpan_absen(
                 hari_ini, emp_id, nama_karyawan, waktu_str, 
-                koordinat_str, user_lat, user_lon, jarak, status_teks
+                koordinat_str, user_lat, user_lon, jarak, status_teks, info_perangkat
             )
 
             if berhasil:
@@ -279,7 +336,6 @@ else:
 
 st.write("") # Memberi jarak spasial kecil
 
-# Tombol dipasang di luar "if" agar SELALU MUNCUL setiap saat
 col1, col2 = st.columns(2)
 with col1:
     waktu_unduh = datetime.now(TZ_WIB).strftime("%Y%m%d_%H%M%S")
@@ -293,7 +349,6 @@ with col1:
     )
     
 with col2:
-    # Mengaktifkan trigger konfirmasi saat tombol ditekan
     if st.button("🗑️ Reset Semua Log Absensi", type="primary", use_container_width=True):
         st.session_state['konfirmasi_reset'] = True
 
@@ -302,7 +357,6 @@ if st.session_state.get('konfirmasi_reset', False):
     st.write("")
     st.warning("⚠️ **PERINGATAN:** Tindakan ini akan menghapus seluruh data riwayat absensi secara permanen.")
     
-    # Kolom input text tersamar untuk password
     input_pass = st.text_input("Masukkan Password Admin:", type="password", key="pass_reset_admin")
     
     c1, c2 = st.columns(2)
@@ -313,7 +367,6 @@ if st.session_state.get('konfirmasi_reset', False):
             
     with c2:
         if st.button("🔥 Konfirmasi Hapus Total", type="primary", use_container_width=True, key="btn_eksekusi_reset"):
-            # Batasi dengan password keamanan admin Anda (bisa diganti "admin123" sesuai keinginan)
             if input_pass == "admin123":
                 conn = sqlite3.connect(DB_NAME)
                 cursor = conn.cursor()
