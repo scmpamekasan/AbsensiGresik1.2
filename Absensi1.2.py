@@ -19,10 +19,6 @@ except ImportError:
 # Definisi Zona Waktu Asia/Jakarta (WIB)
 TZ_WIB = pytz.timezone('Asia/Jakarta')
 
-# Inisialisasi session state untuk auto-clear kamera jika belum ada
-if 'camera_version' not in st.session_state:
-    st.session_state['camera_version'] = 0
-
 # ====================================================
 # 1. KONFIGURASI UTAMA KANTOR & DATA
 # ====================================================
@@ -214,8 +210,6 @@ else:
 # Evaluasi Jarak apabila Koordinat GPS tersedia
 if 'user_lat' in st.session_state and 'user_lon' in st.session_state:
     user_lat = st.session_state['user_lat']
-    user_lon = st.session_state['user_lon8'] if 'user_lon8' in st.session_state else st.session_state['user_lon']
-    # fallback jika ketik typo variabel
     user_lon = st.session_state['user_lon']
     jarak = hitung_jarak_meter(user_lat, user_lon, KANTOR_LATITUDE, KANTOR_LONGITUDE)
     dalam_radius = jarak <= RADIUS_MAKSIMAL_METER
@@ -238,12 +232,11 @@ if st.session_state.get('boleh_scan', False):
     st.write("---")
     st.markdown("### 2️⃣ Pindai QR Code Kantor")
     
-    # PERBAIKAN UTAMA: Menyisipkan key dinamis agar kamera otomatis ter-clear pasca sukses absen
-    camera_key = f"absen_cam_{st.session_state['camera_version']}"
-    picture = st.camera_input("Arahkan kamera ke QR Code Resmi Kantor", key=camera_key)
+    picture = st.camera_input("Arahkan kamera ke QR Code Resmi Kantor")
 
     if picture is not None:
         bytes_data = picture.getvalue()
+        st.image(bytes_data, caption="Pratinjau Foto Absen", width=280)
 
         with st.spinner("Memproses pemindaian QR..."):
             data_qr = scan_qr_code(bytes_data)
@@ -265,13 +258,13 @@ if st.session_state.get('boleh_scan', False):
             if berhasil:
                 st.balloons()
                 st.success(f"🎉 Absensi BERHASIL dicatat untuk **{nama_karyawan}** pada {waktu_str} WIB!")
-                
-                # PERBAIKAN UTAMA: Naikkan versi kamera agar foto di layar otomatis terhapus
-                st.session_state['camera_version'] += 1
-                st.button("Klik Disini Untuk Melanjutkan / Selesai", on_click=st.rerun)
             else:
+                st.warning(f"⚠️ **{nama_karyawan}** sudah melakukan absensi hari ini ({hari_ini}). Data duplikat ditolak oleh sistem.")
+        else:
+            st.error("❌ QR Code tidak valid atau tidak terdeteksi! Pastikan kode tegak lurus dan pencahayaan cukup.")
+
 # ====================================================
-# 6. PANEL ADMIN (RIWAYAT & DOWNLOAD & RESET TOTAL)
+# 6. PANEL ADMIN (RIWAYAT, DOWNLOAD & PROTECTED RESET)
 # ====================================================
 st.write("---")
 st.markdown("### 📊 Panel Monitoring Absensi (Real-time)")
@@ -284,9 +277,9 @@ if not df_absen.empty:
 else:
     st.info("Belum ada riwayat data presensi karyawan yang tercatat di database.")
 
-st.write("") 
+st.write("") # Memberi jarak spasial kecil
 
-# Tombol dipasang sejajar di luar kondisi "if" agar SELALU MUNCUL setiap saat
+# Tombol dipasang di luar "if" agar SELALU MUNCUL setiap saat
 col1, col2 = st.columns(2)
 with col1:
     waktu_unduh = datetime.now(TZ_WIB).strftime("%Y%m%d_%H%M%S")
@@ -300,14 +293,16 @@ with col1:
     )
     
 with col2:
+    # Mengaktifkan trigger konfirmasi saat tombol ditekan
     if st.button("🗑️ Reset Semua Log Absensi", type="primary", use_container_width=True):
         st.session_state['konfirmasi_reset'] = True
 
-# Alur Input Password Admin jika tombol reset ditekan
+# Alur Input Password Admin (Hanya muncul jika tombol reset diklik)
 if st.session_state.get('konfirmasi_reset', False):
     st.write("")
     st.warning("⚠️ **PERINGATAN:** Tindakan ini akan menghapus seluruh data riwayat absensi secara permanen.")
     
+    # Kolom input text tersamar untuk password
     input_pass = st.text_input("Masukkan Password Admin:", type="password", key="pass_reset_admin")
     
     c1, c2 = st.columns(2)
@@ -318,6 +313,7 @@ if st.session_state.get('konfirmasi_reset', False):
             
     with c2:
         if st.button("🔥 Konfirmasi Hapus Total", type="primary", use_container_width=True, key="btn_eksekusi_reset"):
+            # Batasi dengan password keamanan admin Anda (bisa diganti "admin123" sesuai keinginan)
             if input_pass == "admin123":
                 conn = sqlite3.connect(DB_NAME)
                 cursor = conn.cursor()
