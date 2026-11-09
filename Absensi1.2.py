@@ -278,7 +278,6 @@ if 'user_lat' in st.session_state and 'user_lon' in st.session_state:
     else:
         st.error(f"❌ Lokasi Ditolak! Jarak Anda ({jarak:.1f} m) melebihi batas operasional {RADIUS_MAKSIMAL_METER} meter.")
         st.session_state['boleh_scan'] = False
-
 # ====================================================
 # 5. PEMINDAIAN QR CODE (HANYA AKTIF JIKA LOKASI VALID)
 # ====================================================
@@ -286,7 +285,8 @@ if st.session_state.get('boleh_scan', False):
     st.write("---")
     st.markdown("### 2️⃣ Pindai QR Code Kantor")
     
-    picture = st.camera_input("Arahkan kamera ke QR Code Resmi Kantor")
+    # Gunakan key unik agar bisa kita reset via session_state jika diperlukan
+    picture = st.camera_input("Arahkan kamera ke QR Code Resmi Kantor", key="kamera_absen")
 
     if picture is not None:
         bytes_data = picture.getvalue()
@@ -315,11 +315,19 @@ if st.session_state.get('boleh_scan', False):
             if berhasil:
                 st.balloons()
                 st.success(f"🎉 Absensi BERHASIL dicatat untuk **{nama_karyawan}** pada {waktu_str} WIB!")
+                
+                # --- BERSIHKAN / RESET FOTO OTOMATIS ---
+                # Hapus key kamera dari session_state agar widget kamera tertutup/bersih
+                if "kamera_absen" in st.session_state:
+                    del st.session_state["kamera_absen"]
+                
+                # Jeda sebentar agar pesan sukses terbaca, lalu refresh halaman
+                st.rerun()
             else:
                 st.warning(f"⚠️ **{nama_karyawan}** sudah melakukan absensi hari ini ({hari_ini}). Data duplikat ditolak oleh sistem.")
         else:
             st.error("❌ QR Code tidak valid atau tidak terdeteksi! Pastikan kode tegak lurus dan pencahayaan cukup.")
-
+            
 # ====================================================
 # 6. PANEL ADMIN (RIWAYAT, DOWNLOAD & PROTECTED RESET)
 # ====================================================
