@@ -271,3 +271,63 @@ if st.session_state.get('boleh_scan', False):
                 st.session_state['camera_version'] += 1
                 st.rerun()
             else:
+# ====================================================
+# 6. PANEL ADMIN (RIWAYAT, DOWNLOAD & PROTECTED RESET)
+# ====================================================
+st.write("---")
+st.markdown("### 📊 Panel Monitoring Absensi (Real-time)")
+
+df_absen = muat_data_absen()
+
+# Tampilkan tabel absensi jika ada data
+if not df_absen.empty:
+    st.dataframe(df_absen, use_container_width=True)
+else:
+    st.info("Belum ada riwayat data presensi karyawan yang tercatat di database.")
+
+st.write("") 
+
+# Tombol dipasang di luar "if" agar SELALU MUNCUL setiap saat
+col1, col2 = st.columns(2)
+with col1:
+    waktu_unduh = datetime.now(TZ_WIB).strftime("%Y%m%d_%H%M%S")
+    data_excel = to_excel(df_absen)
+    st.download_button(
+        label="📥 Unduh Seluruh Riwayat Absensi (Excel)",
+        data=data_excel,
+        file_name=f"log_absensi_{waktu_unduh}_WIB.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
+    
+with col2:
+    if st.button("🗑️ Reset Semua Log Absensi", type="primary", use_container_width=True):
+        st.session_state['konfirmasi_reset'] = True
+
+# Alur Input Password Admin (Hanya muncul jika tombol reset diklik)
+if st.session_state.get('konfirmasi_reset', False):
+    st.write("")
+    st.warning("⚠️ **PERINGATAN:** Tindakan ini akan menghapus seluruh data riwayat absensi secara permanen.")
+    
+    input_pass = st.text_input("Masukkan Password Admin:", type="password", key="pass_reset_admin")
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("❌ Batalkan", use_container_width=True, key="btn_batal_reset"):
+            st.session_state['konfirmasi_reset'] = False
+            st.rerun()
+            
+    with c2:
+        if st.button("🔥 Konfirmasi Hapus Total", type="primary", use_container_width=True, key="btn_eksekusi_reset"):
+            if input_pass == "admin123":
+                conn = sqlite3.connect(DB_NAME)
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM absensi")
+                conn.commit()
+                conn.close()
+                
+                st.session_state['konfirmasi_reset'] = False
+                st.success("🗑️ Seluruh riwayat log absensi berhasil dibersihkan secara permanen!")
+                st.rerun()
+            else:
+                st.error("❌ Password Admin salah! Data gagal dihapus.")
