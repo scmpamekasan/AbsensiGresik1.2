@@ -16,8 +16,8 @@ KODE_QR_SAH = "KANTOR_UTAMA_SECRET_KEY_2026"
 
 # --- PENGATURAN GEOFENCING ---
 # Ganti dengan koordinat kantor Anda yang sebenarnya
-KANTOR_LATITUDE = -6.200000          # Contoh: Jakarta
-KANTOR_LONGITUDE = 106.816666
+KANTOR_LATITUDE = -7.259138          # Contoh: Kantor DSO
+KANTOR_LONGITUDE = 112.696182
 RADIUS_MAKSIMAL_METER = 150          # Radius yang diizinkan (meter)
 
 KARYAWAN_DATA = {
